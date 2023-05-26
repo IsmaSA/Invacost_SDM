@@ -1,0 +1,300 @@
+###############################################################################
+##################             InvaCost + SDM             #####################
+###############################################################################
+
+#load packages
+suppressMessages({
+  library(dplyr, quiet = TRUE, warn.conflicts = FALSE)
+  library(reshape, quiet = TRUE, warn.conflicts = FALSE)
+  library(ggplot2)
+  library(tidyr)  
+  library(stringr)
+  library(invacost)
+  library(biomod2)
+  library(ggplot2)
+  library(rgbif)
+  library(gridExtra)
+  library(raster)
+  library(rasterVis)
+  library(sp)
+  library(devtools)
+  Sys.setenv(LANGUAGE = "en")
+})
+
+
+#Get InvaCost
+
+invacost<- invacost::getInvaCostVersion(version = "4.1")
+
+
+### Cleaning steps
+# Eliminating data with no information on starting and ending years
+invacost <- invacost[-which(is.na(invacost$Probable_starting_year_adjusted)), ]
+invacost <- invacost[-which(is.na(invacost$Probable_ending_year_adjusted)), ]
+
+# Eliminating data with no usable cost value
+invacost <- invacost[-which(is.na(invacost$Cost_estimate_per_year_2017_USD_exchange_rate)), ]
+
+
+#Remove not usseful species records:
+invacost<-invacost[!grepl("/", invacost$Species),]
+invacost<-invacost[!grepl("sp.", invacost$Species),]
+invacost<-invacost[!grepl("spp.", invacost$Species),]
+
+
+unique(invacost$Species) # 811 species
+
+table(invacost$Environment_IAS)
+table(invacost$Kingdom)
+table(invacost$Species) #records per species
+
+unique(invacost$Official_country)
+table(invacost$Geographic_region)
+
+#### Filter out microorganism
+micro <- c("Bacteria","Chromista","Ortharnavirae","Ortharnavirae","Orthornavirae",
+           "Diverse/Unspecified","Viruses","Fungi")
+
+invacost <- invacost %>% filter(!Kingdom %in% micro)
+table(invacost$Kingdom)
+
+unique(invacost$Species) ### 734 
+
+
+##### Remove Marine species
+marine <- c("Amphibalanus improvisus","Magallana gigas","Mnemiopsis leidyi","Prymnesium polylepis",
+            "Prymnesium polylepis","Caulerpa taxifolia","Callinectes sapidus","Undaria pinnatifida",
+            "Limnoperna fortunei","Pterois volitans","Lagocephalus sceleratus","Red tide","Styela clava",
+            "Sargassum muticum","Portunus pelagicus","Ascophyllum nodosum","Didemnum vexillum",
+            "Crepidula porcellana","Rhopilema nomadica","Ciona intestinalis","Codium fragile",
+            "Paralithodes camtschaticus","Carcinus maenas","Pseudochattonella verruculosa",
+            "Teredo navalis","Cercopagis pengoi","Zostera japonica","Sabella spallanzanii",
+            "Elodea canadensis","Mytilopsis sallei", "Eriocheir sinensis")
+
+
+invacost <- invacost %>% filter(!Species %in% marine)
+
+unique(invacost$Species) ### 711 
+
+
+
+###### Apply reliability filters to InvaCost:
+
+invacost<- invacost %>% filter(Implementation=="Observed") %>% filter(Method_reliability =="High")
+
+unique(invacost$Species) ### 553 
+
+
+
+### Country vs site scale 
+
+unique(invacost$Spatial_scale)
+
+scale <- c("Country", "Site")
+
+invacost<- invacost %>% filter(Spatial_scale %in% scale)
+
+Species_scale <- invacost %>% group_by(Species, Spatial_scale) %>% summarise(N_sp = n()) %>% 
+  group_by(Spatial_scale) %>% summarise(N_sp = n()) #204 species vs. 403
+
+
+invacost<- invacost %>% filter(Spatial_scale =="Country")
+
+
+unique(invacost$Official_country) # 100 countries
+
+
+
+###### Extract GBIF data  ###########
+setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Species_from_GBIF")
+install_github("ropensci/CoordinateCleaner")
+
+
+spn <- invacost %>% filter(!Species %in% Done) 
+spn <-  unique(invacost$Species) 
+n <- spn[1]
+
+Done <- c("Azolla filiculoides", "Bubalus bubalis","Camelus dromedarius","Capra hircus","Cercopagis pengoi",
+          "Equus asinus","Equus caballus","Hystrix brachyura","Melaleuca quinquenervia","Mustela erminea",
+          "Mustela putorius","Neovison vison","Ovis aries","Rattus exulans","Rattus rattus","Sporobolus alterniflorus",
+          "Crassula helmsii","Azolla filiculoides","Sporobolus alterniflorus","Flemingia strobilifera",
+          "Triphasia trifolia","Pterois volitans","Felis catus")
+
+
+period <- c(1985:2022)
+error_species <- c()  # Initialize the variable to store error species
+
+for (n in spn) {
+  tryCatch({
+    sp <- occ_data(scientificName = n, hasCoordinate = TRUE, occurrenceStatus = "PRESENT",
+                   limit = 500000,basisOfRecord="OBSERVATION;HUMAN_OBSERVATION;OCCURRENCE",
+                   coordinateUncertaintyInMeters = "0,10001")
+    sp <- sp[["data"]]
+    
+    sp<- sp %>% filter(year %in% period)
+   # sp <- sp[,c("decimalLatitude","decimalLongitude","basisOfRecord","species","coordinateUncertaintyInMeters",
+   #                  "year","country")]
+    
+    flags<- CoordinateCleaner::clean_coordinates(x = sp,
+                                                  lon = "decimalLongitude",
+                                                  lat = "decimalLatitude",
+                                                  countries = "countryCode",
+                                                  species = "species",
+                                                  tests = c("capitals", "centroids", "equal","gbif",
+                                                            "zeros")) 
+    dat_cl <- sp[flags$.summary,]
+    
+    write_xlsx(dat_cl, paste0(n,".xlsx"))
+    
+    cat(n, "Extracted\n")
+  }
+  , 
+  error = function(e) {
+    cat(n, "Error: Skipping species\n")
+    error_species <- c(error_species, n)  # Save species name with error
+  })
+}
+
+
+
+########### Place GBIF records in GRID ########
+bio
+grid_extent <- extent(-180, 180, -60, 90)  
+
+#Grid
+grid <- raster(grid_extent, res = 0.08333333)
+
+# Create an empty grid cell count raster
+grid_count <- raster(grid)
+
+# Extract the occurrences into the grid cells
+occ_points <- sp::SpatialPoints(data.frame(lon = dat_cl$decimalLongitude, 
+                                           lat = dat_cl$decimalLatitude))
+grid_count <- rasterize(occ_points, grid_count, fun = "count")
+
+plot(grid_count)
+
+# Number of cells
+freq_table <- freq(grid_count) %>% na.omit() %>% as.data.frame() %>% summarise(Ncells=sum(count))
+
+
+
+
+
+########## Expand InvaCost database ###########
+
+expanded <- expandYearlyCosts(invacost, 
+                              startcolumn = "Probable_starting_year_adjusted",
+                              endcolumn = "Probable_ending_year_adjusted")
+
+min(expanded$Impact_year) #
+max(expanded$Impact_year) #
+
+expanded<-expanded %>% filter(Impact_year <= "2022")
+expanded<-expanded %>% filter(Impact_year >= "1985")             
+expanded$cost <- as.numeric(gsub(",", "", expanded$Cost_estimate_per_year_2017_USD_exchange_rate))
+expanded <- expanded[!is.na(expanded$cost),]
+expanded$cost_bil <- (expanded$cost/1000000000)
+sum(expanded$cost_bil) # 272.7867
+nrow(expanded) # 2797
+
+
+
+#Sectors
+unique(expanded$Impacted_sector)
+
+expanded[grep("/", expanded$Impacted_sector),]$Impacted_sector <- "Diverse"
+
+
+data_cost1 <- expanded %>% group_by(Species,  Impacted_sector) %>% 
+  summarise(Total_cost =sum(cost_bil), n=n())
+write_xlsx(data_cost1, "data_cost1.xlsx")
+
+
+
+
+## Combine ID cell of presence species to Environmental variables
+
+#Elevation
+setwd("C:/Users/isma-/Downloads")
+elevation <- rgdal::readOGR("gmted2010.shp")
+elevation <- crop(elevation, grid_extent) #crop to the dimension of BIOCLIM
+
+elevation_raster <- raster(extent(elevation), resolution = c(0.08333333, 0.08333333)) 
+
+
+
+###### Evapotranspiration
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Global-AI_ET0_v3_annual/et0_v3_yr.tif"
+
+Evapotranspiration <- raster(file_path)
+plot(Evapotranspiration)
+
+Evapotranspiration <- crop(Evapotranspiration, grid_extent) #crop to the dimension of BIOCLIM
+Evapotranspiration <- projectRaster(Evapotranspiration, bioc, method = "bilinear") #re-proyect
+
+plot(Evapotranspiration)
+
+# Or use CHELSA DATABASE
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/CHELSA_pet_penman_mean_1981-2010_V.2.1.tif"
+
+Evapotranspiration <- raster(file_path)
+plot(Evapotranspiration)
+
+Evapotranspiration <- crop(Evapotranspiration, grid_extent) #crop to the dimension of BIOCLIM
+Evapotranspiration <- projectRaster(Evapotranspiration, bioc, method = "bilinear") #re-proyect
+Evapotranspiration <- setNames(Evapotranspiration, "Evapotranspiration")
+plot(Evapotranspiration)
+
+
+
+
+##### Slope  ##### 
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/slope_1KMmd_GMTEDmd.tif"
+
+Slope <- raster(file_path)
+plot(Slope)
+
+Slope <- crop(Slope, grid_extent) #crop to the dimension of BIOCLIM
+Slope <- projectRaster(Slope, bioc, method = "bilinear") #re-proyect
+Slope <- setNames(Slope, "Slope")
+plot(Slope)
+
+
+
+
+##### Elevation ##### 
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/elevation_1KMmd_GMTEDmd.tif"
+
+Elevation <- raster(file_path)
+plot(Elevation)
+
+Elevation <- crop(Elevation, grid_extent) #crop to the dimension of BIOCLIM
+Elevation <- projectRaster(Elevation, bioc, method = "bilinear") #re-proyect
+Elevation <- setNames(Elevation, "Elevation")
+plot(Elevation)
+
+
+
+##### Rugosity ##### 
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/roughness_1KMmd_GMTEDmd.tif"
+
+Rugosity <- raster(file_path)
+plot(Rugosity)
+
+Rugosity <- crop(Rugosity, grid_extent) #crop to the dimension of BIOCLIM
+Rugosity <- projectRaster(Rugosity, bioc, method = "bilinear") #re-proyect
+Rugosity <- setNames(Rugosity, "Rugosity")
+plot(Rugosity)
+
+
+
+
+#### Distance to the roads
+road_map <- st_read("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/groads-v1-global-gdb/groads-v1-europe-shp/gROADS-v1-europe.shp")
+raster_layer <- rasterize(road_map, raster(ncol = 100, nrow = 100))  
+distance_to_road <- distance(raster_layer)
+distance_matrix <- as.matrix(distance_to_road)
+
+
+
