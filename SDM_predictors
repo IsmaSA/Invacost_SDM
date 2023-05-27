@@ -2,6 +2,7 @@
 ##################             InvaCost + SDM             #####################
 ###############################################################################
 
+install.packages("fasterize")
 #load packages
 suppressMessages({
   library(dplyr, quiet = TRUE, warn.conflicts = FALSE)
@@ -15,8 +16,11 @@ suppressMessages({
   library(rgbif)
   library(gridExtra)
   library(raster)
+  library(fasterize)
+  library(sf)
   library(rasterVis)
   library(sp)
+  library(rgdal)
   library(devtools)
   Sys.setenv(LANGUAGE = "en")
 })
@@ -290,11 +294,120 @@ plot(Rugosity)
 
 
 
-#### Distance to the roads
+#### Distance to the roads --> https://sedac.ciesin.columbia.edu/data/set/groads-global-roads-open-access-v1
 road_map <- st_read("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/groads-v1-global-gdb/groads-v1-europe-shp/gROADS-v1-europe.shp")
-raster_layer <- rasterize(road_map, raster(ncol = 100, nrow = 100))  
+road_map <- st_read("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/Roads.shp")
+
+nrow(road_map) #1,607,124 roads
+raster_layer <- terra::rasterize(road_map, raster(ncol = 4320, nrow = 1800))  
+
+
+
+#Mins for 1, start-> 21:08, end-> 
+road_map <- road_map[c(1000000:1100000),]
+chunk_size <- 100
+
+num_chunks <- ceiling(nrow(road_map) / chunk_size)
+
+
+setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Roads")
+
+for (i in 1:num_chunks) {
+
+  start_index <- (i - 1) * chunk_size + 1
+  end_index <- min(start_index + chunk_size - 1, nrow(road_map))
+  
+  #chuck running
+  chunk_data <- road_map[start_index:end_index, ]
+  
+  #Rasterize
+  raster_layer <- terra::rasterize(road_map, raster(ncol = 4320, nrow = 1800)) 
+  
+  #save the raster
+  writeRaster(raster_layer, filename = paste0("raster_chunk_", i+1000000,"_",i+1000010, ".tif"))
+
+  rm(chunk_data) #clear the memory (!)
+  cat("Extracted-->", i+1000000,"_",i+1000010)
+}
+
+
+road_map <- road_map[c(1:100000),]
+spn <- unique(road_map$OBJECTID)
+n <- spn[1]
+
+for (n in spn) {
+  
+#  start_index <- (i - 1) * chunk_size + 1
+#  end_index <- min(start_index + chunk_size - 1, nrow(road_map))
+  
+  #chuck running
+ # chunk_data <- road_map[start_index:end_index, ]
+  
+  #filter
+
+  roadmap1 <- road_map %>% filter(OBJECTID==n )
+  
+  #Rasterize
+  raster_layer <- terra::rasterize(roadmap1, raster(ncol = 4320, nrow = 1800)) 
+  
+  #save the raster
+  #writeRaster(raster_layer, filename = paste0("raster_chunk_", i+1000000,"_",i+1000010, ".tif"))
+  writeRaster(raster_layer, filename = paste0("raster_chunk_", n, ".tif"))
+  
+  rm(chunk_data) #clear the memory (!)
+  
+  cat("Extracted-->", n)
+  #cat("Extracted-->", i+1000000,"_",i+1000010)
+}
+
+
+
+chunk_size <- 10
+num_chunks <- ceiling(nrow(road_map) / chunk_size)
+
+chunk_size <- ceiling(nrow(road_map) / num_chunks)
+
+process_chunk <- function(start_index, end_index) {
+  # Chunk processing
+  chunk_data <- road_map[start_index:end_index, ]
+  
+  # Rasterize
+  raster_layer <- terra::rasterize(chunk_data, raster(ncol = 4320, nrow = 1800))
+  
+  # Save the raster
+  writeRaster(raster_layer, filename = paste0("raster_chunk_", start_index, "-", end_index, ".tif"))
+  
+  rm(chunk_data) # Clear the memory
+  
+  cat("Chunk processed -->", start_index, "-", end_index, "\n")
+}
+
+# Execute the nested loops using foreach
+foreach(i = 1:num_chunks, .packages = c("terra")) %:%
+  foreach(j = 1:num_chunks, .packages = c("terra")) %:%
+  foreach(k = 1:num_chunks, .packages = c("terra")) %dopar% {
+    start_index <- ((i - 1) * num_chunks + j - 1) * chunk_size + 1
+    end_index <- min(start_index + chunk_size - 1, nrow(road_map))
+    
+    process_chunk(start_index, end_index)
+  }
+
+
+
+stopImplicitCluster()
+
+
+
+
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Roads/raster_chunk_1.tif"
+
+raster_layer <- raster(file_path)
+plot(raster_layer)
+
 distance_to_road <- distance(raster_layer)
-distance_matrix <- as.matrix(distance_to_road)
+#distance_matrix <- as.matrix(distance_to_road)
 
+writeRaster(distance_to_road, filename = "distance_to_road.tif", format = "GTiff" )
 
-
+plot(road_map)
+plot(distance_to_road)
