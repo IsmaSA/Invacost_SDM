@@ -375,15 +375,54 @@ stopImplicitCluster()
 
 
 
-file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Roads/raster_chunk_1.tif"
 
-raster_layer <- raster(file_path)
-plot(raster_layer)
 
-distance_to_road <- distance(raster_layer)
-#distance_matrix <- as.matrix(distance_to_road)
+setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Roads") # where I have all the roads, 
 
-writeRaster(distance_to_road, filename = "distance_to_road.tif", format = "GTiff" )
+list_roads <- list.files(pattern = "raster_chunk")
+list_roads <- [1:100]
 
-plot(road_map)
-plot(distance_to_road)
+grid_extent <- extent(-180, 180, -60, 90) 
+bio <- raster::getData('worldclim', var='bio', res=5)
+
+combined_raster <- raster(grid_extent, res = res(bio))
+m <- values(combined_raster)
+m[] <- 0
+
+ncore<- 10
+
+while(i < length(list_roads) 
+      
+      pos1= fornext (j in i:min((i+ncore-1),length(list_roads))) %dopar% length(list_roads) ) {
+  
+  raster_data <- raster(list_roads[i]) # load raster
+  
+  
+  pos <- which(!is.na(values(raster_data))) # No NAs position
+  return(pos)
+  
+  #} #sq
+  
+  pos2=unlist(pos1)
+  
+  if (length(pos2) > 0)  {
+    
+    
+    m[pos2] <-  m[pos2] + 1
+    
+    i=j # or +1
+    
+  }
+  
+  m[m == 0] <- NA
+  
+  
+  #Assign values of m to raster_data
+  values(combined_raster) <- m
+  
+  cat("Remain-->",1001- i,":\n")
+  
+}
+}
+
+
