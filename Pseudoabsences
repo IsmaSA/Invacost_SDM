@@ -1,0 +1,73 @@
+# Background GBIF records:
+
+
+
+install.packages("httr")
+library(httr)
+library(httr)
+library(jsonlite)
+
+api_url <- "https://io.biodiversite-quebec.ca/stac/collections/gbif_heatmaps/items"
+
+response <- GET(api_url)
+
+if (status_code(response) == 200) {
+  data <- content(response, "text", encoding = "UTF-8")
+  data_json <- fromJSON(data, flatten = FALSE)
+  
+  tiff_links <- lapply(data_json$features, function(item) item$links[[length(item$links)]]$href)
+  
+  # In fact, I fuck the code somewhere but I am not sure where, inspecting the data_json can dowload the file
+  for (i in seq_along(tiff_links)) {
+    cat("TIFF link", i, ":", tiff_links[[i]], "\n")
+  }
+download.file(tiff_links[7], "file.tif")
+
+
+
+
+##Lets read now the file:
+GBIF <- "C:/Users/isma-/Downloads/gbif_all_density_06-2022.tif"
+GBIF <- raster(GBIF)
+
+plot(GBIF)
+
+
+GBIF <- resample(GBIF, bio) #adjust the resolution of the GBIF layer
+GBIF
+
+
+
+library(raster)
+library(sp)
+
+
+occurrence_counts <- as.vector(getValues(GBIF))
+
+occurrence_counts[is.na(occurrence_counts)] <- 0
+
+records <- data.frame(x = numeric(), y = numeric()) 
+
+while (nrow(records) < 10000) {
+
+  selected_cell <- sample(length(occurrence_counts), size = 1, prob = occurrence_counts)
+  
+  cell_coords <- xyFromCell(GBIF, selected_cell)
+
+  records <- rbind(records, data.frame(x = cell_coords[1], y = cell_coords[2]))
+  
+  occurrence_counts[selected_cell] <- occurrence_counts[selected_cell] - 1
+  
+  occurrence_counts <- occurrence_counts[occurrence_counts > 0]
+  cat(".")
+}
+
+
+sp_points <- SpatialPoints(records)
+plot(sp_points, add=T)
+plot(bio[["bio5"]])
+
+
+
+writeOGR(sp_points, "path_to_output_directory", "records", driver = "ESRI Shapefile")
+
