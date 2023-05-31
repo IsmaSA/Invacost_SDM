@@ -167,3 +167,14 @@ library(usdm)
 v <- vifstep(predictors) 
 vif(predictors) 
 v
+
+
+drop <- c("bio1","bio4","bio5","bio6","bio10","bio11","bio16","bio17")
+bioc <- exclude(predictors,v) #exclude the correlated variables using th = 10.
+
+
+bioc
+
+output_file <- "predictors1.tif"
+
+writeRaster(predictors, filename = output_file, format = "GTiff",overwrite=TRUE )
