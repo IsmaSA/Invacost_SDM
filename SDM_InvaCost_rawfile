@@ -366,14 +366,6 @@ foreach(trozo = index, .combine = rbind) %dopar% {
   IsmaSA(trozo)
 }
 
-stopImplicitCluster()
-
-
-
-stopImplicitCluster()
-
-
-
 
 
 
@@ -424,5 +416,34 @@ while(i < length(list_roads)
   
 }
 }
+
+
+############  Note: Here is an updated version of the while loop ----------
+
+m[] <- NA
+
+ncore <- 10
+i <- 1
+
+while (i < length(list_roads)) {
+  pos1 <- foreach (j = i:min((i+ncore-1), length(list_roads))) %dopar% {
+    raster_data <- raster(list_roads[j])
+    pos <- which(!is.na(values(raster_data)))
+    return(pos)
+  }
+  
+  pos2 <- unlist(pos1)
+  
+  if (length(pos2) > 0) {
+    m[pos2] <- m[pos2] + 1
+    i <- i + ncore
+  }
+  
+  m[is.na(m)] <- 0
+  values(combined_raster) <- m 
+  
+  cat("Remain-->", 10001 - i, ":\n")
+}
+
 
 
