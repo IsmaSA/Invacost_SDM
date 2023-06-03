@@ -178,3 +178,180 @@ bioc
 output_file <- "predictors1.tif"
 
 writeRaster(predictors, filename = output_file, format = "GTiff",overwrite=TRUE )
+
+
+
+
+
+################ Script to place GBIF records in the cells: ------------
+
+gc()
+bio_resampled # as example grid of our predictors
+grid_extent <- extent(-180, 179, -56, 84)  
+
+grid <- raster(grid_extent, res = 0.08333333)
+
+grid_count <- raster(grid)
+
+
+folder_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Species_from_GBIF"  
+
+
+species <- list.files(folder_path, pattern = "\\.xlsx$", full.names = TRUE)
+
+result_df <- data.frame(Species = character(), Ncells = numeric(), stringsAsFactors = FALSE)
+
+for (files in species) { 
+
+  data <- readxl::read_xlsx(files)
+  
+  #data<- data %>% filter(year <2023)
+  
+  occ_points <- sp::SpatialPoints(data.frame(lon = data$decimalLongitude, 
+                                             lat = data$decimalLatitude))
+  
+  grid_count <- rasterize(occ_points, grid_count, fun = "count")
+  
+
+  unique_species <- unique(data$species)
+  
+  freq_table <- freq(grid_count) %>% na.omit() %>% as.data.frame() %>%
+    summarise(Ncells = sum(count))
+  
+  result_df <- result_df %>% 
+    bind_rows(data.frame(Species = unique_species, Ncells = freq_table$Ncells, stringsAsFactors = FALSE))
+  
+cat(files, "==> Done\n")
+
+  }
+
+
+print(result_df)
+
+result_df1<- result_df %>% filter(Ncells < 10)
+
+
+
+### Lets combine the species data with predictors data
+
+file.list <- list.files(pattern='*.xlsx') #171 species
+df.list <- lapply(file.list, read_excel)
+
+df <- do.call(rbind, df.list) #7.8 million records
+
+
+
+# Now our aim here is reduce the redundant information of the predictors. To this lets extract unique cells
+
+occ_points <- sp::SpatialPoints(data.frame(lon = df$decimalLongitude, 
+                                           lat = df$decimalLatitude))
+
+Grid_points <- rasterize(occ_points, grid_count, fun = "count")
+
+cell.ids <- cellFromXY(Grid_points, occ_points)
+cell.ids <- unique(cell.ids) #1.75 million of unique cells
+
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/predictors1.tif"
+predictors <- raster(file_path)
+
+bioclim <- extract(bio_resampled, cell.ids)
+Elevation <- extract(Elevation_resampled, cell.ids)
+Slope <- extract(Slope_resampled, cell.ids)
+Evapotranspiration <- extract(Evapotranspiration_resampled, cell.ids)
+Rugosity <- extract(Rugosity_resampled, cell.ids)
+Roads <- extract(Roads, cell.ids)
+
+
+predictors <- data.frame(cell.id = cell.ids,
+                         bioclim = bioclim,
+                         Elevation = Elevation,
+                         Slope = Slope,
+                         Evapotranspiration = Evapotranspiration,
+                         Rugosity = Rugosity,
+                         Roads = Roads
+                         )
+
+ 
+
+write.csv2(predictors, "ID_predictors.csv")
+write_xlsx(predictors, "ID_predictors.xlsx")
+
+
+# Cool now we need the same but for the species:
+
+spn<- unique(df$species)
+n <- spn[1]
+result_df <- data.frame(species = character(), cell.id = numeric(), stringsAsFactors = FALSE)
+
+for (n in spn) {
+  data <- df[df$species == n, ]
+  data$decimalLongitude <- as.numeric(as.character(data$decimalLongitude))
+  data$decimalLatitude <- as.numeric(as.character(data$decimalLatitude))
+  
+  occ_points <- sp::SpatialPoints(data.frame(lon = data$decimalLongitude, lat = data$decimalLatitude))
+  Grid_points <- rasterize(occ_points, grid_count, fun = "count")
+  cell.ids <- cellFromXY(Grid_points, occ_points)
+  cell.ids <- unique(cell.ids)
+  
+  result_df <- rbind(result_df, data.frame(species = rep(n, length(cell.ids)), cell.id = cell.ids))
+  cat("yatusabes-->", n, ":\n")
+}
+
+unique_species <- unique(result_df$species)
+result_df$species_ID <- match(result_df$species, unique_species)
+result_df<- result_df[,-3]
+write_xlsx(result_df, "Species_ID.xlsx")
+
+
+
+
+
+
+
+
+
+
+{
+aquatic <- c("Aedes aegypti",
+"Aedes camptorhynchus",
+"Alopochen aegyptiaca",
+"Azolla filiculoides",
+"Branta canadensis",
+"Crassula helmsii",
+"Cygnus olor",
+"Pontederia crassipes",
+"Homarus americanus",
+"Hydrocotyle ranunculoides",
+"Lagarosiphon major",
+"Lythrum salicaria",
+"Myriophyllum aquaticum",
+"Ondatra zibethicus",
+"Pacifastacus leniusculus"
+,"Panicum repens"
+,"Petromyzon marinus"
+,"Phoxinus phoxinus"
+,"Pomacea canaliculata"
+,"Pseudorasbora parva"
+,"Trachemys scripta"
+,"Xenopus laevis"
+,"Aedes albopictus"
+,"Alternanthera philoxeroides"
+,"Cabomba caroliniana"
+,"Castor canadensis"
+,"Chelydra serpentina"
+,"Corbicula fluminea"
+,"Dreissena polymorpha"
+,"Elodea nuttallii"
+,"Lithobates catesbeianus"
+,"Ludwigia grandiflora"
+,"Myocastor coypus"
+,"Mustela vison"
+,"Nymphoides peltata"
+,"Oxyura jamaicensis"
+,"Phragmites australis"
+,"Pistia stratiotes"
+,"Procambarus clarkii"
+,"Rhinella marina"
+,"Salvinia molesta"
+,"Tinca tinca")
+} # aquatic species
