@@ -1,0 +1,99 @@
+###############################################################################
+#################                 ALGORITHM             ######################
+###############################################################################
+
+gc()
+setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost")
+
+### GAMs
+library(mgcv)
+sp <- read_xlsx("Species_ID.xlsx")
+env <- read_xlsx("ID_predictors.xlsx")
+background <- read_xlsx("pseudoabsences.xlsx")
+
+
+
+# Example for one species
+
+sp1<- sp %>% filter(species=="Sus scrofa") %>% mutate(presence=1)
+
+data <- bind_rows(sp1, background)
+
+SDM_data<- right_join(data,env, by="cell.id")
+
+response<- SDM_data$presence
+predictors <- c("bioclim.bio2", "bioclim.bio1","bioclim.bio10", "bioclim.bio4", "Elevation", "Rugosity", "Slope")
+
+formula <- as.formula(paste("presence ~", paste0("s(", predictors, ")", collapse = "+")))
+
+GAM_model <- gam(formula, data = SDM_data, family = binomial)
+summary(GAM_model)
+
+
+
+world_extent <- extent(-180, 179, -56, 84)
+prediction_raster <- raster(world_extent, resolution = 0.08333333)
+
+
+
+env_subset <- env[, predictors]
+
+# Predict using the GAM model and the subset of env data
+prediction <- predict(GAM_model, newdata = env_subset, type = "response", na.action = "na.pass")
+
+prediction_matrix <- matrix(prediction, nrow = nrow(prediction_raster), ncol = ncol(prediction_raster), byrow = TRUE)
+
+# Create a new raster from the prediction_matrix
+prediction_raster <- raster(prediction_matrix, xmn = extent(prediction_raster)[1], xmx = extent(prediction_raster)[2],
+                            ymn = extent(prediction_raster)[3], ymx = extent(prediction_raster)[4],
+                            crs = projection(prediction_raster))
+
+# Plot the prediction on a world map
+plot(prediction_raster, col = rev(heat.colors(10)), legend = FALSE)
+maps::map("world", add = TRUE, col = "lightgray", fill = TRUE)
+
+
+levelplot(prediction_raster, col.regions = rev(heat.colors(10)), margin = FALSE,
+          panel = function(...) {
+            panel.levelplot(...)
+            maps::map("world", add = TRUE, col = "lightgray", fill = FALSE, lwd = 0.5)
+          })
+
+
+
+
+bio <- raster::getData('worldclim', var='bio', res=5)
+bioclim_variable <- bio[[3]]
+
+
+water_mask <- bioclim_variable > 0  
+water_mask <- crop(water_mask, grid_extent) 
+masked_prediction <- mask(prediction_raster, water_mask)
+
+
+levelplot(masked_prediction, col.regions = rev(heat.colors(10)), margin = FALSE,
+          panel = function(...) {
+            panel.levelplot(...)
+            maps::map("world", add = TRUE, col = "lightgray", fill = FALSE, lwd = 0.5)
+          })
+
+
+
+
+color_palette <- viridis(5)
+
+# Convert raster to a data frame
+df <- as.data.frame(masked_prediction, xy = TRUE)
+ggplot() +
+  geom_tile(data = df, aes(x = x, y = y, fill = layer), width = 1, height = 1) +
+  scale_fill_gradientn(colors = color_palette) +
+  theme_void() +
+  borders("world", colour = "lightgray", fill = NA)
+
+
+
+
+
+
+
+
