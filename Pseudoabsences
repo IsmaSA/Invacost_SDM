@@ -47,8 +47,9 @@ occurrence_counts <- as.vector(getValues(GBIF))
 occurrence_counts[is.na(occurrence_counts)] <- 0
 
 records <- data.frame(x = numeric(), y = numeric()) 
+records <- read_xlsx("pseudoabsences.xlsx")
 
-while (nrow(records) < 10000) {
+while (nrow(records) < 25000) {
 
   selected_cell <- sample(length(occurrence_counts), size = 1, prob = occurrence_counts)
   
@@ -62,12 +63,35 @@ while (nrow(records) < 10000) {
   cat(".")
 }
 
-
+#writexl::write_xlsx(records, "pseudoabsences1.xlsx") 9226
+records<- read_excel("pseudoabsences1.xlsx", sheet = "Sheet2")
 sp_points <- SpatialPoints(records)
-plot(sp_points, add=T)
+
 plot(bio[["bio5"]])
+plot(sp_points, add=T)
+
+point <- extract(bio, sp_points) %>% as.data.frame() %>% mutate(ID= 1:24143 ) %>% drop_na()
+point %>% filter(bio2 > 0 ) %>% nrow()
+
+filtered_sp_points <- sp_points[!is.na(point), ]
+
+
+a<-sp_points %>% as.data.frame() %>% mutate(ID= 1:length(sp_points))
+
+
+b<- semi_join(a,point, by="ID")
+writexl::write_xlsx(b, "pseudoabsences1.xlsx")
 
 
 
-writeOGR(sp_points, "path_to_output_directory", "records", driver = "ESRI Shapefile")
+
+
+a <- rasterToPoints(GBIF)
+c <- a[sample(nrow(a), 10000), ]
+
+
+plot(c, ,add=T)
+sp_points <- SpatialPoints(c)
+point <- extract(bio, sp_points) %>% as.data.frame() %>% mutate(ID= 1:10000 ) %>% drop_na()
+sp_points <- SpatialPoints(point)
 
