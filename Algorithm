@@ -4,11 +4,34 @@
 
 gc()
 setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost")
-
+suppressMessages({
+  library(dplyr, quiet = TRUE, warn.conflicts = FALSE)
+  library(reshape, quiet = TRUE, warn.conflicts = FALSE)
+  library(ggplot2)
+  library(tidyr)  
+  library(stringr)
+  library(invacost)
+  library(biomod2)
+  library(ggplot2)
+  library(rgbif)
+  library(gridExtra)
+  library(raster)
+  library(fasterize)
+  library(sf)
+  library(rasterVis)
+  library(sp)
+  library(mgcv)
+  library(caret)
+  library(pROC)
+  library(xlsx)
+  library(readxl)
+  library(writexl)
+  library(rgdal)
+  library(devtools)
+  Sys.setenv(LANGUAGE = "en")
+})
 ### GAMs
-library(mgcv)
-library(caret)
-library(pROC)
+
 set.seed(123)
 
 sp <- read_xlsx("Species_ID.xlsx")
@@ -35,7 +58,7 @@ gam_models <- list()
 
 for (n in spn) {
   sp1<- sp[sp$species == n,]
-  sp$presence <- 1
+  sp1$presence <- 1
   
   if (nrow(sp1) < 10) {
     next  
@@ -56,7 +79,7 @@ for (n in spn) {
   
   #Start modelling
   response<- train_data$presence
-  predictors <- c("bioclim.bio2", "bioclim.bio1","bioclim.bio10", "bioclim.bio4", "Elevation", "Rugosity", "Slope")
+  predictors <- c("bioclim.bio2","bioclim.bio10", "bioclim.bio4", "Elevation", "Rugosity", "Slope")
    formula <- as.formula(paste("presence ~", paste0("s(", predictors, ", k = 5)", collapse = "+")))
   
   GAM_model <- gam(formula, data = train_data, family = binomial, select = TRUE)
@@ -109,29 +132,87 @@ for (n in spn) {
   gam_models[[n]] <- GAM_model
   combined_model <- combine(gam_models)
   
+  gc()
   
-  #-----------------------
-  # Predicción sobre el mundo
-  prediction <- predict(combined_model, newdata = env_subset, type = "response", na.action = "na.pass")
+  cat("GAM model -->",n, ":\n")
+  
+}  
+  
+  
+gc()
+
+# Combine the GAMs models and extract the prediction
+combined_prediction_raster <- raster(prediction_raster)
+
+for (i in seq_along(gam_models)) {
+  GAM_model <- gam_models[[i]]
+  
+  prediction <- predict(GAM_model, newdata = env_subset, type = "response", na.action = "na.pass")
+  
   prediction_matrix <- matrix(prediction, nrow = nrow(prediction_raster), ncol = ncol(prediction_raster), byrow = TRUE)
+  
   prediction_raster <- raster(prediction_matrix, xmn = extent(prediction_raster)[1], xmx = extent(prediction_raster)[2],
                               ymn = extent(prediction_raster)[3], ymx = extent(prediction_raster)[4],
                               crs = projection(prediction_raster))
   
-  # Máscara
-  bioclim_variable <- bio[[3]]
-  water_mask <- bioclim_variable > 0  
-  water_mask <- crop(water_mask, grid_extent) 
-  masked_prediction <- mask(prediction_raster, water_mask)
+  combined_prediction_raster <- addLayer(combined_prediction_raster, prediction_raster)
+}
+
+#plot(combined_prediction_raster)
+
+
+# Lets make weighted average for the ensemble model
+weights <- AUC_df$auc / sum(AUC_df$auc)
+weighted_ensemble_prediction <- function(models, weights, newdata) {
+  predictions <- lapply(models, function(model) predict(model, newdata = newdata, type = "response",na.action = "na.pass"))
+  weighted_prediction <- Reduce("+", Map("*", predictions, weights))
+  return(weighted_prediction)
+}
+
+
+ensemble_prediction <- weighted_ensemble_prediction(gam_models, weights, env_subset)
+prediction_matrix <- matrix(ensemble_prediction, nrow = nrow(prediction_raster), ncol = ncol(prediction_raster), byrow = TRUE)
+
+
+prediction_raster <- raster(matrix(0, nrow = nrow(prediction_raster), ncol = ncol(prediction_raster)), xmn = world_extent@xmin, xmx = world_extent@xmax,
+                            ymn = world_extent@ymin, ymx = world_extent@ymax, crs = "+proj=longlat")
+
+
+prediction_matrix <- matrix(ensemble_prediction, nrow = nrow(prediction_raster), ncol = ncol(prediction_raster), byrow = TRUE)
+
+
+values(prediction_raster) <- prediction_matrix
+
+#Mask
+bioclim_variable <- bio[[3]]
+water_mask <- bioclim_variable > 0  
+water_mask <- crop(water_mask, grid_extent) 
+masked_prediction <- mask(prediction_raster, water_mask)
+
+
+plot(masked_prediction) # The final plot :-)
   
-  # Plot
+  
+
+  
+  
+  
+  
+  
+  
+
+
+
+
+
+  
+  
+  
+  
+  
+  #Plot
   cl <- colorRampPalette(c('gray90','gray75','gray65','gray50','gray30'))
   breaks <- seq(0, 1, by = 0.2)
-  
-  pdf_file <- paste0("plot_", n, ".pdf")
-  
-  # Open a PDF device with the unique file name
-  pdf(pdf_file)
   
   levelplot(masked_prediction, col.regions = cl, margin = FALSE,
             at = breaks,
@@ -139,12 +220,30 @@ for (n in spn) {
               panel.levelplot(...)
               map("world", add = TRUE, col = "green", fill = FALSE, lwd = 0.5)
             })
-  dev.off()
-  cat("LOL", ":/n")
-  
+
 }
-  
-  
+
+
+
+
+
+
+
+
+
+summary(GAM_model)
+op <- par(mfrow=c(2,2), mar=c(4,4,1,1))
+gam.check(GAM_model)
+par(op)
+op <- par(mfrow=c(3,3), mar=c(4,4,1,1))
+plot(GAM_model, all.terms = TRUE, rug=TRUE, shade= TRUE, shade.col = "lightblue", seWithMean = TRUE, residuals=TRUE)
+par(op)
+
+
+
+
+
+
 
 
 
