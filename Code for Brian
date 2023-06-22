@@ -1,10 +1,13 @@
-
-
 ### Final code:
 
+## INDEX:
+#INVACOST DATA --> Line 41
+#BACKGROUND DATA --> Line 141
+#GAM MODELS --> Line 204
+# EXTRACTION  SUITABILITY  --> Line 394
+#COMBINE DATASET WITH MACROSCALARS + time since invasion --> Line 538
+#USE OF SCALARS --> INTERPOLATION  --> Line 626
 
-gc()
-setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost")
 suppressMessages({
   library(dplyr, quiet = TRUE, warn.conflicts = FALSE)
   library(reshape, quiet = TRUE, warn.conflicts = FALSE)
