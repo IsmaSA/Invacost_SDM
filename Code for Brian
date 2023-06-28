@@ -695,7 +695,7 @@ for (i in spn) {
   
   for (j in 1:length(country)) {
     invacost5 <- invacost4 %>% filter(country == country[j])
-    observed_costs <- invacost5$Cost
+    observed_costs <- invacost4$Cost
     mean_cost <- sum(observed_costs) / n
     
     df_extrapolation2 <- df_extrapolation1 %>% filter(species == i)
@@ -705,13 +705,13 @@ for (i in spn) {
       df_extrapolation3 <- df_extrapolation2 %>% filter(country == country2[k])
       
       if (nrow(df_extrapolation3) > 0) {
-        GDP_ck <- invacost5$GDP
+        GDP_ck <- mean(invacost4$GDP)
         GDP_ck <- gsub(",", "", GDP_ck) %>% as.numeric()
         
-        pop_size_ck <- invacost5$Pop_size
+        pop_size_ck <- mean(invacost4$Pop_size)
         pop_size_ck <- gsub(",", "", pop_size_ck) %>% as.numeric()
         
-        agri_area_ck <- invacost5$Agriculture
+        agri_area_ck <- mean(invacost4$Agriculture)
         agri_area_ck <- gsub(",", "", agri_area_ck) %>% as.numeric()
         
         GDP_ci <- as.numeric(df_extrapolation3$GDP)
@@ -720,7 +720,7 @@ for (i in spn) {
         
         #Suitability scalar
         suitability_ci <- df_extrapolation3$suitability
-        suitability_ck <- invacost5$suitability
+        suitability_ck <- mean(invacost4$suitability)
         
         colnames(invacost5)[7]<- "suitability"
         # Add suitability area with the time since invasion
@@ -732,7 +732,7 @@ for (i in spn) {
           A_prime_ci <- suitability_ci
         }
         
-        if (invacost5$suitability > 0 ) {
+        if (sum(invacost4$suitability) > 0 ) {
           z <- b0 + b1 * suitability_ci
           A_prime_ck <- suitability_ck / (1 + exp(-z))
           A_prime_ck<- as.numeric(A_prime_ck)
@@ -779,6 +779,9 @@ for (i in spn) {
           predictor_indices <- match(predictors, all_predictor_names)
           predictor_ci <- all_predictors_ci[predictor_indices]
           predictor_ck <- all_predictors_ck[predictor_indices]
+          names(predictor_ck) <- predictors
+          names(predictor_ci) <- predictors
+          
           # Case 1: Set standard deviation to a predefined constant
           if(length(observed_costs) == 1) {
             par1 <- c(rep(0.1, length(predictors)), 0.1)  # or another constant of your choice
@@ -801,10 +804,10 @@ for (i in spn) {
                 n = n,
                 predictor_names = predictors
               ), 
-              interval = c(0, 1)  # choose suitable bounds for your problem
+              interval = c(-1, 1)  # choose suitable bounds for your problem
             )
             gamma_optimized <- c(predictor= result$minimum, sd = 0.1)
-            names(gamma_optimized) <- c(predictor,"sd")
+            names(gamma_optimized) <- c(predictors,"sd")
             gamma_optimized <- gamma_optimized[names(gamma_optimized) != "sd"]
             
           } else {
@@ -832,16 +835,16 @@ for (i in spn) {
           for (pred in predictors) {
             gamma_optimized_pred <- gamma_optimized[pred] # get the corresponding gamma value
             
-            ratio <- (as.numeric(df_extrapolation3[[pred]]) / invacost5[[pred]]) ^ gamma_optimized_pred
+            ratio <- (as.numeric(df_extrapolation3[[pred]]) / mean(invacost4[[pred]])) ^ gamma_optimized_pred
             fit.t1[[paste0("ratios_", pred)]] <- ratio
           }
           
           fit.t1_values <- sapply(fit.t1, function(x) x)
           
-          interpolated_cost <- observed_costs * prod(fit.t1_values)
+          interpolated_cost <- mean(observed_costs) * prod(fit.t1_values)
           
           fit <- list(interpolated_cost = interpolated_cost, 
-                      observed_costs = observed_costs)
+                      observed_costs = mean(observed_costs))
           
           aic <- aic.fit(fit, gamma_optimized)
           aic_results[[paste0("m", m)]] <- list(AIC = aic, gamma = gamma_optimized)  # Store the AIC and gamma values for each model
@@ -871,12 +874,17 @@ for (i in spn) {
         }
         
         fit.t1_values <- sapply(fit, function(x) x)
+        if(length(fit.t1) == 0){
+          interpolated_cost <- mean(observed_costs)
+        } else {
+          
         fit.t1_values <- fit.t1_values[!is.na(fit.t1_values)]
         fit.t1_values <- fit.t1_values[names(fit.t1_values) != "interpolated_cost"]
         fit.t1_values <- fit.t1_values[names(fit.t1_values) != "observed_costs"]
         
-        interpolated_cost <- observed_costs * prod(fit.t1_values)
-        
+        fit.t1_values <- unlist(fit.t1_values) 
+        interpolated_cost <- mean(observed_costs) * prod(fit.t1_values)
+        }
         
         result <- data.frame(Species = i, Country = country2[k], Cost_interpolated = interpolated_cost)
         
