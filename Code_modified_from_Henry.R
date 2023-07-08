@@ -1,6 +1,4 @@
-###############################################################################
-
-# In this case I am calculating the gamma for each macroeconomic-scalar
+##############################################################################
 
 ##Script modified from Henry et al., 2023 
 
@@ -9,6 +7,10 @@
 # bound_ratio truncates the ratios values if it's outside the range of the data
 # scale_fit_fun is the main function to optimised the parameters gamma1, calculates metrics of fit, and estimate unknown costs
 # aic.fit is a custom-made AIC function to calculate the metrics of fit for each model (to later do model averaging)
+
+##############################################################  FUNCTIONS   ##############################################################
+##############################################################  FUNCTIONS   ##############################################################
+##############################################################  FUNCTIONS   ##############################################################
 
 
 do_df_extrap <- function(df.sp, df.fit){
@@ -176,26 +178,27 @@ aic.fit <- function(x, gamma1){
   return(aic)
 } #Ok
 
+################################################################################################################################################
+################################################################################################################################################
+################################################################################################################################################
 
-  
+
 ############ Spatial and sectoral projections ############
 
 library(doBy)
 library(tidyr)
 library(dplyr)
 
-### Functions necessary in the script "funcs_all.R"
+#invacost33 = invacost33[,-10]
+#invacost33$cost_mil = invacost33$Cost /  1000000
+#colnames(invacost33)[3]= 'Type_of_cost_merged'
 
-source("Henry_2023_funcs.R")
-
-invacost33 = invacost33[,-10]
-invacost33$cost_mil = invacost33$Cost /  1000000
-colnames(invacost33)[3]= 'Type_of_cost_merged'
-
+invacost33= read_xlsx('invacost33.xlsx')
 eu.df.full <- invacost33
 eu.df.full$comb2 <- paste(eu.df.full$species, eu.df.full$Type_of_cost_merged) #create a column with the combination of species name, sector impacted, and type of costs (damage, management, mixed)
 eu.df.full <- eu.df.full[order(eu.df.full$comb2),] #reorder so everything matches later
 
+df_extrapolation1= read_xlsx('df_extrapolation1.xlsx')
 dfsp <- df_extrapolation1 #data for extrapolation
 dfsp = dfsp[ ,-3]
 
@@ -217,7 +220,10 @@ colnames(eu.df)[4]= 'Cost_estimate_per_year_2017_USD_exchange_rate'
 colnames(dfsp)[1] = 'Species'
 colnames(dfsp)[2] = 'Official_country'
 
-pred.list <- pred.l[['m2']]
+#################################################################    START     ####################################################################
+#################################################################    START     ####################################################################
+#################################################################    START     ####################################################################
+
 for(m in 1:length(pred.l)){ #loop over each model
   pred.list <- pred.l[[m]] #to obtain the correct predictors
   
@@ -276,5 +282,8 @@ for(m in 1:length(pred.l)){ #loop over each model
 }
 
 
-############################################################################################################
+##################################################     END     ###################################
+##################################################     END     ###################################
+##################################################     END     ###################################
+
 
