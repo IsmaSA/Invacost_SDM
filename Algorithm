@@ -64,82 +64,178 @@ for (n in spn) {
     next  
   }
   
-  #Combine data
-  data <- bind_rows(sp1, background) # sp + background
-  SDM_data<- right_join(env,data, by="cell.id") # + env data
-  #SDM_data$presence <- ifelse(is.na(SDM_data$presence), 0, SDM_data$presence)
+  #Species data + env data
+  sp1_env <- right_join(env,sp1, by= "cell.id")  # bg PLANTS
   
- #Split in train and evalutaion 
-  indices <- sample(nrow(SDM_data))
-  n_train <- round(0.7 * nrow(SDM_data))
+  #Background data + env data
+  if ("Plants" %in% unique(sp1$Order)) {
+    data <- right_join(predictors_bg, background5, by="cell.id")  # bg PLANTS
+    
+  } else if ("Arthropods" %in% unique(sp1$Order)) {
+    data <- right_join(predictors_bg, background3, by="cell.id")  # bg Arthropods
+    
+  } else if ("All_density" %in% unique(sp1$Order)) {
+    data <- right_join(predictors_bg, background1, by="cell.id")  # bg All_density
+    
+  } else if ("Reptilia" %in% unique(sp1$Order)) {
+    data <- right_join(predictors_bg, background6, by="cell.id")  # bg Reptilia
+    
+  } else if ("Mammalia" %in% unique(sp1$Order)) {
+    data <- right_join(predictors_bg, background4, by="cell.id")  # bg Mammalia
+    
+  } else if ("Amphibia" %in% unique(sp1$Order)) {
+    data <- right_join(predictors_bg, background2, by="cell.id")  # bg Amphibia
+  }
+  
+  
+  SDM_data<- bind_rows(sp1_env,data) # presence + bg
+  
+  SDM_data$presence <- ifelse(is.na(SDM_data$presence), 0, SDM_data$presence)
+  
+  #Additional step to retain full variables with predictors:
+  SDM_data <- SDM_data[complete.cases(SDM_data$bioclim.bio1), ]
+  
+  SDM_data$presence <- as.factor(SDM_data$presence)
+  
+ #Split in train and evalutaion --> Not for now
+  #indices <- sample(nrow(SDM_data))
+  #n_train <- round(0.7 * nrow(SDM_data))
 
-  train_data <- SDM_data[indices[1:n_train], ]
-  val_data <- SDM_data[indices[(n_train+1):nrow(SDM_data)], ]
+  #train_data <- SDM_data[indices[1:n_train], ]
+  #val_data <- SDM_data[indices[(n_train+1):nrow(SDM_data)], ]
   
   
   #Start modelling
-  response<- train_data$presence
-  predictors <- c("bioclim.bio2","bioclim.bio10", "bioclim.bio4", "Elevation", "Rugosity", "Slope")
-   formula <- as.formula(paste("presence ~", paste0("s(", predictors, ", k = 5)", collapse = "+")))
+  response<- SDM_data$presence
+  predictors <- c("bioclim.bio2","bioclim.bio3", "bioclim.bio8","bioclim.bio9","bioclim.bio13","bioclim.bio14","bioclim.bio15","bioclim.bio18","bioclim.bio19", "Elevation", "Slope","Roads")
+  formula <- as.formula(paste("presence ~", paste0("s(", predictors, ", k = 5)", collapse = "+")))
   
-  GAM_model <- gam(formula, data = train_data, family = binomial, select = TRUE)
+  GAM_model <- gam(formula, data = SDM_data, family = binomial, select = TRUE)
+  
+  #  #Check concurvity:
+  #  concurvity_threshold <- 0.8
+  #worst_concurvity <- 1 
+  #predictor_to_remove <- NULL  
+  
+  #  while (worst_concurvity >= concurvity_threshold) {
+  #    predictors <- attr(terms(GAM_model), "term.labels")
+  #    worst_concurvity <- 0
+  #    
+  #    for (predictor in predictors) {
+  #      
+  #     formula_temp <- update(formula, . ~ . - eval(parse(text = predictor)))
+  #     GAM_model_temp <- gam(formula_temp, data = SDM_data, family = binomial, select = TRUE)
+  #     
+  #     resampled_data <- SDM_data
+  #      resampled_data$presence <- sample(resampled_data$presence)
+  #     
+  #     # Fit the GAM model with the resampled data
+  #     GAM_model_resampled <- gam(formula_temp, data = resampled_data, family = binomial, select = TRUE)
+  #     
+  #   
+  #     concurvity_value <- concurvity(GAM_model_temp) - concurvity(GAM_model_resampled)
+  #     worst_concurvity <- max(worst_concurvity, concurvity_value)
+  #    
+  #     if (worst_concurvity >= concurvity_threshold) {
+  #      predictor_to_remove <- predictor
+  #     }
+  #   }
+  #  
+  #  if (!is.null(predictor_to_remove)) {
+  #    
+  #    formula <- update(formula, . ~ . - eval(parse(text = predictor_to_remove)))
+  #     GAM_model <- gam(formula, data = train_data, family = binomial, select = TRUE)
+  #  }
+  # }
   
   
-  #Check concurvity:
-  concurvity_threshold <- 0.8
-  worst_concurvity <- 1 
-  predictor_to_remove <- NULL  
-  
-  while (worst_concurvity >= concurvity_threshold) {
-    predictors <- attr(terms(GAM_model), "term.labels")
-    worst_concurvity <- 0
-    
-    for (predictor in predictors) {
-      
-      formula_temp <- update(formula, . ~ . - eval(parse(text = predictor)))
-      GAM_model_temp <- gam(formula_temp, data = train_data, family = binomial, select = TRUE)
-      
-      resampled_data <- train_data
-      resampled_data$presence <- sample(resampled_data$presence)
-      
-      # Fit the GAM model with the resampled data
-      GAM_model_resampled <- gam(formula_temp, data = resampled_data, family = binomial, select = TRUE)
-      
-    
-      concurvity_value <- concurvity(GAM_model_temp) - concurvity(GAM_model_resampled)
-      worst_concurvity <- max(worst_concurvity, concurvity_value)
-      
-      if (worst_concurvity >= concurvity_threshold) {
-        predictor_to_remove <- predictor
-      }
-    }
-    
-    if (!is.null(predictor_to_remove)) {
-      
-      formula <- update(formula, . ~ . - eval(parse(text = predictor_to_remove)))
-      GAM_model <- gam(formula, data = train_data, family = binomial, select = TRUE)
-    }
-  }
-  
-  env_subset <- env[, predictors]
-  
-  #validation the model
-  pred_probs <- predict(GAM_model, newdata = val_data, type = "response")
-  auc<- roc(val_data$presence, pred_probs)$auc
-  AUC_df <- rbind(AUC_df, data.frame(species = n, auc = auc))
-  
-  #combine the models
-  gam_models[[n]] <- GAM_model
-  combined_model <- combine(gam_models)
-  
+
   gc()
   
   cat("GAM model -->",n, ":\n")
+
+#plot(bioc[[1]])
+
+
+prediction <- predict(GAM_model, newdata = as.data.frame(bioc), type = "response", na.action = "na.pass")
+#range(prediction, na.rm = T)
+
+prediction_matrix <- matrix(prediction, nrow = ncol(bioc), ncol = nrow(bioc))
+prediction_matrix<- t(prediction_matrix)
+
+prediction_raster <- raster(prediction_matrix, xmn = extent(bioc)[1], xmx = extent(bioc)[2],
+                            ymn = extent(bioc)[3], ymx = extent(bioc)[4],
+                            crs = projection(bioc))
+
+values(prediction_raster) <- prediction_matrix
+
+
+#validation the model ---------------------------    (Not for now)
+#pred_probs <- prediction
+
+#binary_predictions <- ifelse(predicted_probs > 0.7, 1, 0)
+
+#auc<- roc(binary_predictions, pred_probs, na.rm=T)$auc
+#AUC_df <- rbind(AUC_df, data.frame(species = n, auc = auc))
+
+## Cross validation 
+
+numFolds <- trainControl(method = "cv", number = 5)
+cvFolds <- createFolds(train_data$presence, k = 5)
+
+auc <- vector()
+#folds
+for(i in 1:5){
   
-}  
+  # Partition the data
+  trainIndex <- cvFolds[[i]]
+  cvTrainData <- train_data[trainIndex, ]
+  cvTestData <- train_data[-trainIndex, ]
   
+  # Fit the model
+  GAM_model <- gam(presence ~ s(bioclim.bio2, k = 5) + s(bioclim.bio3, k = 5) + 
+                     s(bioclim.bio8, k = 5) + s(bioclim.bio9, k = 5) + s(bioclim.bio13, 
+              k = 5) + s(bioclim.bio14, k = 5) + s(bioclim.bio15, k = 5) + 
+                     s(bioclim.bio18, k = 5) + s(bioclim.bio19, k = 5) + s(Elevation, 
+     k = 5) + s(Slope, k = 5) + s(Roads, k = 5), 
+                   family = binomial(link = 'logit'), 
+                   data = cvTrainData)
   
+  # Make predictions
+  pred <- predict(GAM_model, newdata = cvTestData, type = "response")
+  
+  # Compute AUC and store it
+  roc_obj <- roc(cvTestData$presence, pred)
+  auc[i] <- auc(roc_obj)
+  cat("*")
+}
+AUC_df <- rbind(AUC_df, data.frame(species = n, auc = mean(auc)))
+
+
+
+
+
+# Lets save prediction raster as a file
+prediction_file <- file.path(folder_a, paste0("prediction_", n, ".tif")) 
+writeRaster(prediction_raster, filename = prediction_file, format = "GTiff", overwrite=TRUE)
+
+
+plot_file <- file.path(folder_b, paste0("plot_", n, ".pdf"))  # Save in folder B
+
+pdf(plot_file)
+plot(prediction_raster, main = n)
+
+dev.off()
 gc()
+cat("Plot -->",n, ":\n")
+}
+
+
+##############################################################################################################################
+
+##############################################################################################################################
+
+
 
 # Combine the GAMs models and extract the prediction
 combined_prediction_raster <- raster(prediction_raster)
