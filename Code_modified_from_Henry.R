@@ -224,6 +224,13 @@ colnames(dfsp)[2] = 'Official_country'
 #################################################################    START     ####################################################################
 #################################################################    START     ####################################################################
 
+
+cost.types = unique(invacost33$Type_of_cost_merged)
+v.AIC.costtypes <- numeric(length(cost.types))
+extrap_list <- list()
+df.list <- list()
+  
+pred.list <- pred.l[['m2']]
 for(m in 1:length(pred.l)){ #loop over each model
   pred.list <- pred.l[[m]] #to obtain the correct predictors
   
@@ -240,6 +247,9 @@ for(m in 1:length(pred.l)){ #loop over each model
   
   df.fit.full <- as.data.frame(df.fit.full)
   
+  for (i in cost.types) {
+    df.list[[i]] <- df.fit.full[df.fit.full$Type_of_cost_merged == i,]
+    
   if(length(par1) == 1){ #cannot use optim with a single precictor
     par1 <- c(0,1000) #reassign par1 beacause optim need to know the min and max to look for the optimized value
     op.gamma <- optimize(scale_fit_fun, par1, maximum = F, df= df.fit.full, pred.list= pred.list, extrap= F, fit.test=F) #optimisation function
@@ -255,7 +265,7 @@ for(m in 1:length(pred.l)){ #loop over each model
   fit.t1 <- scale_fit_fun(gamma1 = gamma1, df.fit.full, pred.list= pred.list, extrap = F, fit.test=T) #extract df to calculate measure of fit
   v.AIC <- aic.fit(fit.t1, gamma1= gamma1)
   
-  
+  v.AIC.costtypes[i] <- v.AIC
   ##Estimation of projected costs
   ratio.fit <- get_ratio(df.fit.full, pred.list= pred.list) #obtain all the ratios
   df.extrap <- df.extrap[names(eu.df)] #make sure the columns names match
@@ -270,16 +280,17 @@ for(m in 1:length(pred.l)){ #loop over each model
   df.full.extrap = as.data.frame(df.full.extrap)
   #Run the function scale_fit_fun to obtain predictde costs
   extrap <- scale_fit_fun(gamma1 = gamma1, df.full.extrap, pred.list=pred.list, extrap = T, fit.test= F)
-  
+  extrap$model <- m
+  #write_xlsx(extrap, file=paste0("Ismael_SDM", "_",m,"_",i, ".xlsx"))
   sum_pred_cost <- sum(extrap$cost_pred, na.rm= T)
   
-  gamma.df2 <- c(gamma1, v.AIC, sum_pred_cost)
-  names(gamma.df2) <- c(pred.list, "sd", "v.AIC", "sum_pred_cost")
-  
-  write_xlsx(gamma.df2, file=paste0("./","EU_cost", "_", names(pred.l[m]),".xlsx"))
-  
-  cat('SIIIIIIIIIUU ====', pred.list,'==== Done', "\n")
+  gamma.df2 <- c(m, gamma1, v.AIC, sum_pred_cost, i)
+  names(gamma.df2) <- c("model", pred.list, "sd", "v.AIC", "sum_pred_cost", "type_of_cost")
+  #write_xlsx(gamma.df2, file=paste0("./","Ismael_SDM", "_", names(pred.l[m]),".xlsx"))
+  cat('SIIIIIIIIIUU  ==== ', pred.list,'Done  ====  SIIIIIIIIIUU', "\n")
 }
+}
+
 
 
 ##################################################     END     ###################################
