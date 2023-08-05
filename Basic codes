@@ -918,31 +918,147 @@ ggplot(data = world_data) +
 
 
 
-log_likelihood <- function(gamma, observed_costs, predictors_ci, predictors_ck, n, predictor_names) {
-  interpolated_cost <- sum(observed_costs, na.rm = TRUE) / n
-  predicted_costs <- interpolated_cost
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##############  suitability scalar 
+setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/New_results")
+
+# Suitability scalar
+data<- read_xlsx("full_database2.xlsx")
+head(data)
+data<- data[,c(1:3,7:9)]
+unique(data$Order)
+str(data)
+
+
+data$FirstRecord <- as.numeric(data$FirstRecord)
+data$FirstRecord[is.na(data$FirstRecord)] <- mean(data$FirstRecord, na.rm = TRUE)
+
+coefficients <- data.frame(Order = character(), bo = numeric(), b1 = numeric(), stringsAsFactors = FALSE)
+
+for (ord in unique(data$Order)) {
+
+  data_sub <- subset(data, Order == ord)
   
-  for (i in seq_along(predictor_names)) {
-    ratios <- as.numeric(predictors_ci[[i]]) / (as.numeric(predictors_ck[[i]]) + 1e-8) # added small constant to avoid division by zero
-    predicted_costs <- predicted_costs * prod(ratios^gamma[i], na.rm = TRUE)
-  }
+
+  glm_nb <- glm.nb(sqrt(suitability) ~ FirstRecord, data = data_sub)
   
-  deviation <- observed_costs - predicted_costs
-  negative_log_likelihood <- sum(deviation^2, na.rm = TRUE)
-  return(negative_log_likelihood)
+  # Extract the coefficients and store them in the data frame
+  bo <- coef(glm_nb)[1] # Intercept
+  b1 <- coef(glm_nb)[2] # FirstRecord coefficient
+  
+  coefficients <- rbind(coefficients, data.frame(Order = ord, bo = bo, b1 = b1))
 }
 
 
+dat <- merge(dat, data[c("species", "Order")], by = "species", all.x = TRUE)
+dat <- dat[!duplicated(dat[c('species', 'country', 'Type_of_cost_merged', 'FirstRecord', 'suitability', 'cost_mil', 'type', 'Order')]), ]
 
-aic.fit <- function(x, gamma1) {
-  predicted_costs <- x$interpolated_cost * prod((x$A_prime_ci / x$A_prime_ck)^gamma1)
-  print(predicted_costs)  # debug line
-  deviation <- x$observed_costs - predicted_costs
-  print(deviation)  # debug line
-  negative_log_likelihood <- sum(deviation^2)
-  print(negative_log_likelihood)  # debug line
-  aic <- -2 * negative_log_likelihood + 2 * (length(gamma1) - 1)
-  print(aic)  # debug line
-  return(aic)
-}        
+
+A_prime_ck <- numeric(nrow(dat))
+for (i in 1:nrow(dat)) {
+  
+  inva1 <- dat[i, ]
+  ord <- inva1$Order
+  
+  # Filter the coefficients for the current Order
+  coefficients1 <- coefficients %>% filter(Order == ord)
+  
+  if (!is.na(inva1$suitability) && inva1$suitability > 0 ) {
+    z <- coefficients1$bo + coefficients1$b1 * mean(data$suitability[data$Order == ord], na.rm = TRUE)
+    A_prime_ck[i] <- inva1$suitability / (1 + exp(-z))
+    
+  } else {
+    A_prime_ck[i] <- inva1$suitability
+  }
+  
+  
+  cat("*")
+}
+
+# Add the new column to the data
+dat$A_prime_ck <- A_prime_ck
+write_xlsx(dat, "suitability_scalar.xlsx")
+
+
+sp<- read_xlsx("Species_ID.xlsx")
+unique(sp$species)
+sp$species[sp$species == "Pontederia crassipes"] <- "Eichhornia crassipes"
+sp$species[sp$species == "Mustela vison"] <- "Neovison vison"
+sp$species[sp$species == "Phthorimaea absoluta"] <- "Tuta absoluta"
+
+#Open InvaCost database used to build the model
+invacost1 <- invacost %>% group_by(Species, Official_country, Type_of_cost_merged) %>% summarise(
+  Cost= sum(Cost_estimate_per_year_2017_USD_exchange_rate)) %>% drop_na()
+
+invacost1 <- invacost1 %>% filter(!Official_country %in% c("Diverse/Unspecified")) %>% filter(!Species=="Varroa destructor")
+eu.df.full <- invacost1 %>% filter(Species %in% unique(sp$species))
+unique(eu.df.full$Species) #167 
+#Only include data at the country level
+
+eu.df.country <- eu.df.full
+
+# Country only data + combination of species, sector and type of cost ----------------------------------------
+
+comb4 <- paste(eu.df.country$Species, ",", eu.df.country$Type_of_cost_merged) #Add comma so we can easily separate
+print(paste("Number of unique combination when considering species and type of cost:", length(unique(comb4))))
+
+comb.unique4 <- data.frame(comb.unique= unique(comb4)) #need as dataframe to use the function separate
+
+##Convert this vector to a dataframe
+df.comb4 <- separate(comb.unique4, col= "comb.unique", c("Species", "Type_of_cost_merged"), sep=" , ")
+
+# Prepare data for extrapolation from species.csv -------------------------
+
+##Open dataframe containing the presence of invasive species in Europe
+
+sp<- read_xlsx("Elza_database.xlsx")
+unique(sp$Species)
+sp<- sp %>% filter (Taxon %in% unique(invacost33$Species)) # 164
+sp <- sp[,c(1,2,6)]
+colnames(sp) <- c("Species", "country","Cost")
+sp$Cost <- as.double(sp$Cost)
+sp$Cost<- 0
+
+# How many specie are present in both the InvaCost data and the extrapolation df --------
+nb.sp4 <- intersect(df.comb4$Species, sp$Species) ; print(length(unique(nb.sp4))) #Country only data, combination of species, impacted sector and type of cost: 46
+
+
+
+# Build dataframe for extrapolation ---------------------------------------
+sp4 <- sp[sp$Species %in% df.comb4$Species,]
+df.extrapolation4 <- merge(df.comb4, sp4, by= "Species")
+df.extrapolation4 <- df.extrapolation4 %>% unite("Link", c(Species,country))
+invacost33 <- invacost33 %>% unite("Link", c(species,country))
+
+df.extrapolation4<- df.extrapolation4 %>% filter(!Link %in% unique(invacost33$Link))
+unique(df.extrapolation4$Species)
+
+write_xlsx(df.extrapolation4,"df_extrapolation1_version3.0.xlsx")
+
 
