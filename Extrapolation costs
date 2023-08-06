@@ -202,25 +202,42 @@ suppressMessages({
   library(rgdal)
   Sys.setenv(LANGUAGE = "en")
 })
+sp<- read_xlsx("Species_ID.xlsx")
+unique(sp$species)
+sp$species[sp$species == "Pontederia crassipes"] <- "Eichhornia crassipes"
+sp$species[sp$species == "Mustela vison"] <- "Neovison vison"
+sp$species[sp$species == "Phthorimaea absoluta"] <- "Tuta absoluta"
 
-
-
+setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/New_results")
 # InvaCost data:
-invacost33= read_xlsx('invacost33.xlsx')
+invacost33= read_xlsx('invacost33_version2.0.xlsx') 
+invacost33 <- invacost33 %>% filter(species %in% unique(sp$species))
+invacost33<- invacost33 %>% filter(!Type_of_cost_merged=="Mixed")
+unique(invacost33$species) #162
+invacost33 <- invacost33[,-c(3,10)] #quitar 10
 eu.df.full <- invacost33
 eu.df.full$comb2 <- paste(eu.df.full$species, eu.df.full$Type_of_cost_merged) #create a column with the combination of species name, sector impacted, and type of costs (damage, management, mixed)
 eu.df.full <- eu.df.full[order(eu.df.full$comb2),] #reorder so everything matches later
 
+eu.df.full$Pop_size <- gsub(",", "", eu.df.full$Pop_size) %>% as.numeric()
+eu.df.full$GDP <- gsub(",", "", eu.df.full$GDP)%>%as.numeric()
+eu.df.full$Agriculture <- gsub(",", "", eu.df.full$Agriculture)%>%as.numeric()
 # Transformation (!)
 eu.df.full$cost_mil <- log1p(eu.df.full$cost_mil)
-
+eu.df.full$Cost <- log1p(eu.df.full$Cost)
 
 # Extrapolation data
 df_extrapolation1= read_xlsx('df_extrapolation1.xlsx')
+df_extrapolation1= read_xlsx('df_extrapolation1_version3.0.xlsx')
+
 dfsp <- df_extrapolation1 #data for extrapolation
-dfsp = dfsp[ ,-3]
+dfsp = dfsp[ ,-c(3,7)]# Cost
+dfsp<- dfsp %>% filter(!Type_of_cost_merged=="Mixed")
+unique(dfsp$species) #162
 
-
+dfsp$Pop_size <- gsub(",", "", dfsp$Pop_size) %>% as.numeric()
+dfsp$GDP <- gsub(",", "", dfsp$GDP)%>%as.numeric()
+dfsp$Agriculture <- gsub(",", "", dfsp$Agriculture)%>%as.numeric()
 
 
 ##Give all the combinations of predictors (in order to tell scale_fit_fun what it should run)
@@ -239,6 +256,7 @@ eu.df <- eu.df.full
 colnames(eu.df)[1] = 'Species'
 colnames(eu.df)[2] = 'Official_country'
 colnames(eu.df)[4]= 'Cost_estimate_per_year_2017_USD_exchange_rate'
+
 
 colnames(dfsp)[1] = 'Species'
 colnames(dfsp)[2] = 'Official_country'
@@ -695,7 +713,7 @@ names(v.AIC.costtypes) = cost.types
 results_df <- data.frame()
 
 
-pred.list <- pred.l[["m4"]]
+pred.list <- pred.l[["m12"]]
 for(m in 1:length(pred.l)){ #loop over each model
   pred.list <- pred.l[[m]] #to obtain the correct predictors
   
@@ -818,9 +836,120 @@ for(m in 1:length(pred.l)){ #loop over each model
 
 
 
-############## 
+##############  suitability scalar 
+setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/New_results")
+
+# Suitability scalar
+data<- read_xlsx("full_database2.xlsx")
+head(data)
+data<- data[,c(1:3,7:9)]
+unique(data$Order)
+str(data)
+
+
+data$FirstRecord <- as.numeric(data$FirstRecord)
+data$FirstRecord[is.na(data$FirstRecord)] <- mean(data$FirstRecord, na.rm = TRUE)
+
+coefficients <- data.frame(Order = character(), bo = numeric(), b1 = numeric(), stringsAsFactors = FALSE)
+
+for (ord in unique(data$Order)) {
+
+  data_sub <- subset(data, Order == ord)
+  
+
+  glm_nb <- glm.nb(sqrt(suitability) ~ FirstRecord, data = data_sub)
+  
+  # Extract the coefficients and store them in the data frame
+  bo <- coef(glm_nb)[1] # Intercept
+  b1 <- coef(glm_nb)[2] # FirstRecord coefficient
+  
+  coefficients <- rbind(coefficients, data.frame(Order = ord, bo = bo, b1 = b1))
+}
+
+
+dat <- merge(dat, data[c("species", "Order")], by = "species", all.x = TRUE)
+dat <- dat[!duplicated(dat[c('species', 'country', 'Type_of_cost_merged', 'FirstRecord', 'suitability', 'cost_mil', 'type', 'Order')]), ]
+
+
+A_prime_ck <- numeric(nrow(dat))
+for (i in 1:nrow(dat)) {
+  
+  inva1 <- dat[i, ]
+  ord <- inva1$Order
+  
+  # Filter the coefficients for the current Order
+  coefficients1 <- coefficients %>% filter(Order == ord)
+  
+  if (!is.na(inva1$suitability) && inva1$suitability > 0 ) {
+    z <- coefficients1$bo + coefficients1$b1 * mean(data$suitability[data$Order == ord], na.rm = TRUE)
+    A_prime_ck[i] <- inva1$suitability / (1 + exp(-z))
+    
+  } else {
+    A_prime_ck[i] <- inva1$suitability
+  }
+  
+  
+  cat("*")
+}
+
+# Add the new column to the data
+dat$A_prime_ck <- A_prime_ck
+write_xlsx(dat, "suitability_scalar.xlsx")
+
+
+sp<- read_xlsx("Species_ID.xlsx")
+unique(sp$species)
+sp$species[sp$species == "Pontederia crassipes"] <- "Eichhornia crassipes"
+sp$species[sp$species == "Mustela vison"] <- "Neovison vison"
+sp$species[sp$species == "Phthorimaea absoluta"] <- "Tuta absoluta"
+
+#Open InvaCost database used to build the model
+invacost1 <- invacost %>% group_by(Species, Official_country, Type_of_cost_merged) %>% summarise(
+  Cost= sum(Cost_estimate_per_year_2017_USD_exchange_rate)) %>% drop_na()
+
+invacost1 <- invacost1 %>% filter(!Official_country %in% c("Diverse/Unspecified")) %>% filter(!Species=="Varroa destructor")
+eu.df.full <- invacost1 %>% filter(Species %in% unique(sp$species))
+unique(eu.df.full$Species) #167 
+#Only include data at the country level
+
+eu.df.country <- eu.df.full
+
+# Country only data + combination of species, sector and type of cost ----------------------------------------
+
+comb4 <- paste(eu.df.country$Species, ",", eu.df.country$Type_of_cost_merged) #Add comma so we can easily separate
+print(paste("Number of unique combination when considering species and type of cost:", length(unique(comb4))))
+
+comb.unique4 <- data.frame(comb.unique= unique(comb4)) #need as dataframe to use the function separate
+
+##Convert this vector to a dataframe
+df.comb4 <- separate(comb.unique4, col= "comb.unique", c("Species", "Type_of_cost_merged"), sep=" , ")
+
+# Prepare data for extrapolation from species.csv -------------------------
+
+##Open dataframe containing the presence of invasive species in Europe
+
+sp<- read_xlsx("Elza_database.xlsx")
+unique(sp$Species)
+sp<- sp %>% filter (Taxon %in% unique(invacost33$Species)) # 164
+sp <- sp[,c(1,2,6)]
+colnames(sp) <- c("Species", "country","Cost")
+sp$Cost <- as.double(sp$Cost)
+sp$Cost<- 0
+
+# How many specie are present in both the InvaCost data and the extrapolation df --------
+nb.sp4 <- intersect(df.comb4$Species, sp$Species) ; print(length(unique(nb.sp4))) #Country only data, combination of species, impacted sector and type of cost: 46
 
 
 
+# Build dataframe for extrapolation ---------------------------------------
+sp4 <- sp[sp$Species %in% df.comb4$Species,]
+df.extrapolation4 <- merge(df.comb4, sp4, by= "Species")
+df.extrapolation4 <- df.extrapolation4 %>% unite("Link", c(Species,country))
+invacost33 <- invacost33 %>% unite("Link", c(species,country))
+
+df.extrapolation4<- df.extrapolation4 %>% filter(!Link %in% unique(invacost33$Link))
+unique(df.extrapolation4$Species)
+
+write_xlsx(df.extrapolation4,"df_extrapolation1_version3.0.xlsx")
 
 
