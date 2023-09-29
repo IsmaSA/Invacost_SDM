@@ -1,0 +1,751 @@
+
+# PLots For SDMs InvaCost
+
+# Ismael Soto
+
+setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Brian code/Results_Ismael")
+setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Brian code")
+#load packages
+suppressMessages({
+  library(dplyr, quiet = TRUE, warn.conflicts = FALSE)
+  library(reshape, quiet = TRUE, warn.conflicts = FALSE)
+  library(ggplot2)
+  library(tidyr)  
+  library(stringr)
+  library(invacost)
+  library(biomod2)
+  library(ggplot2)
+  library(rgbif)
+  library(gridExtra)
+  library(raster)
+  library(fasterize)
+  library(sf)
+  library(rasterVis)
+  library(sp)
+  library(rgdal)
+  library(devtools)
+  Sys.setenv(LANGUAGE = "en")
+})
+
+# invacost
+inva <- read_xlsx("eu.df2.xlsx") #inva
+damage <- read_xlsx("Interpolation_costs_Damage.xlsx") # damage
+management <- read_xlsx("Interpolation_costs_Management.xlsx") # management
+
+
+
+total <- rbind(damage,management) # both costs
+sum(total$cost_pred)/1000
+
+
+# Overall information
+inva$billion =exp(inva$Cost_estimate_per_year_2017_USD_exchange_rate)/1000000000
+damage$billion =damage$cost_pred/1000
+management$billion =management$cost_pred/1000
+
+sum(inva$billion) #126.8125
+nrow(inva) # 377
+unique(inva$Official_country)
+unique(total$Official_country)
+
+setdiff(inva$Official_country, total$Official_country)
+
+Total_cost  <- 433.3988 + 126.8125
+
+
+### Information from InvaCost: ###########
+inva
+
+#damage vs managment
+a <- inva %>%
+  group_by(Type_of_cost_merged) %>%
+  summarise(Cost = sum(billion), .groups = "drop") %>%
+  mutate(Percentage = Cost / sum(Cost) * 100)
+
+z <- rbind(damage1, management1) %>%
+  group_by(Type_of_cost_merged) %>%
+  summarise(Cost = sum(billion), .groups = "drop") %>%
+  mutate(Percentage = Cost / sum(Cost) * 100)
+
+# Only Invacost
+a<- inva %>%
+  group_by(Official_country, Type_of_cost_merged) %>%
+  summarise(Cost = sum(billion), .groups = "drop") %>%
+  group_by(Type_of_cost_merged) %>%
+  mutate(Percentage = (Cost / sum(Cost)) * 100)
+
+# Both invacost and interpolated
+b<- damage1 %>%
+  group_by(Official_country, Type_of_cost_merged) %>%
+  summarise(Cost = sum(billion), .groups = "drop") %>%
+  group_by(Type_of_cost_merged) %>%
+  mutate(Percentage = (Cost / sum(Cost)) * 100)
+
+# Both invacost and interpolated
+c<- management1 %>%
+  group_by(Official_country, Type_of_cost_merged) %>%
+  summarise(Cost = sum(billion), .groups = "drop") %>%
+  group_by(Type_of_cost_merged) %>%
+  mutate(Percentage = (Cost / sum(Cost)) * 100)
+
+
+
+
+
+
+##################33
+names(inva)
+names(damage)
+names(management)
+
+
+inva<- inva[,c(1,2,3,16)]
+damage<- damage[, c(1,2,3,15)]
+management<- management[, c(1,2,3,15)]
+
+inva$type <- "Invacost"
+damage$type <- "Interpolated"
+management$type <- "Interpolated"
+
+
+damage1 <- rbind(inva[inva$Type_of_cost_merged == "Damage", ] , damage)
+management1 <- rbind(inva[inva$Type_of_cost_merged == "Management", ] , management)
+
+
+
+# Figure 1: Scheme of the methodology ####
+
+# Figure 2: # Damage vs management costs  geographic region ####
+
+library(rworldmap)
+world_map <- getMap()
+
+summary_data <- aggregate(billion ~ Official_country, damage1, sum)
+range(summary_data$billion) # 0.00038   122.09
+
+# Join your summary data with the world map
+summary_data$Official_country[summary_data$Official_country== 'Viet Nam'] = 'Vietnam'
+summary_data$Official_country[summary_data$Official_country== 'Czechia'] = 'Czech Republic'
+summary_data$Official_country[summary_data$Official_country== 'Brunei Darussalam'] = 'Brunei'
+#summary_data$Official_country[summary_data$Official_country== 'Eswatini'] = 'Vietnam'
+#summary_data$Official_country[summary_data$Official_country== 'Greenland'] = 'Vietnam'
+summary_data$Official_country[summary_data$Official_country== 'Guinea-Bissau'] = 'Guinea Bissau'
+summary_data$Official_country[summary_data$Official_country== 'Iran, Islamic Republic of'] = 'Iran'
+summary_data$Official_country[summary_data$Official_country== 'Korea, Republic of'] = 'South Korea'
+summary_data$Official_country[summary_data$Official_country== 'Micronesia, Federated States of'] = 'Federated States of Micronesia'
+summary_data$Official_country[summary_data$Official_country== 'Russian Federation'] = 'Russia'
+summary_data$Official_country[summary_data$Official_country== 'Serbia'] = 'Republic of Serbia'
+#summary_data$Official_country[summary_data$Official_country== 'Syrian Arab Republic'] = 'Vietnam'
+summary_data$Official_country[summary_data$Official_country== 'Tanzania, United Republic of'] = 'United Republic of Tanzania'
+summary_data$Official_country[summary_data$Official_country== 'Timor-Leste'] = 'East Timor'
+summary_data$Official_country[summary_data$Official_country== 'United Kingdom of Great Britain and Northern Ireland'] = 'United Kingdom'
+
+setdiff(summary_data$Official_country, world_map$SOVEREIGNT)
+setdiff(world_map$SOVEREIGNT, summary_data$Official_country)
+
+str_subset(world_map$SOVEREIGNT, "ape")
+
+
+summary_data<- summary_data %>% filter(!Official_country %in% c("Eswatini","Greenland","Syrian Arab Republic"))
+
+world_map$cost_bil <- summary_data$billion[match(world_map$SOVEREIGNT, summary_data$Official_country)]
+
+moll_projection <- CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0")
+world_map_moll <- spTransform(world_map, moll_projection)
+
+
+
+
+
+
+### Transformation fo the cost becasue the plot is quite ugly
+world_map$cost_log <- log(world_map$cost_bil + 1) # Adding 1 to avoid log(0)
+
+log_breaks <- seq(min(world_map$cost_log, na.rm = TRUE), max(world_map$cost_log, na.rm = TRUE), length.out = 7)
+
+world_map$cost_bil_category <- cut(world_map$cost_log, breaks = log_breaks, include.lowest = TRUE)
+table(world_map$cost_bil_category)
+
+# Create a categorical variable using these breaks
+world_map$cost_log_category <- cut(world_map$cost_log, breaks = log_breaks, include.lowest = TRUE)
+palette_colors <- RColorBrewer::brewer.pal(7, "YlOrRd")
+palette_colors_alpha <- grDevices::adjustcolor(palette_colors, alpha.f = 0.8)
+
+plot <- mapCountryData(world_map, 
+                       nameColumnToPlot = "cost_log_category",
+                       catMethod = "categorical",
+                       colourPalette = palette_colors_alpha,
+                       missingCountryCol = "white",
+                       mapRegion = "world",
+                       borderCol = "black", # More black country borders
+                       lwd = 0.5, 
+                       addLegend = F) # Line width of country borders
+
+labels <- sprintf("%.2f", exp(log_breaks) - 1)
+labels[1] <- "<0.01" # Change the first label
+
+legend("topleft", legend = labels, fill = palette_colors, title = "Economic cost ($USD billion)", cex = 1.2, bty = "n", seg.len = 5)
+
+
+
+### Just damage:
+
+
+library(rworldmap)
+world_map <- getMap()
+
+summary_data <- aggregate(billion ~ Official_country, damage1[damage1$type=="Invacost", ], sum)
+range(summary_data$billion) # 0.00004   73.85
+
+world_map$cost_bil <- summary_data$billion[match(world_map$SOVEREIGNT, summary_data$Official_country)]
+
+world_map$cost_log <- log(world_map$cost_bil + 1) # Adding 1 to avoid log(0)
+world_map$cost_log_category <- cut(world_map$cost_log, breaks = log_breaks, include.lowest = TRUE)
+
+plot <- mapCountryData(world_map, 
+                       nameColumnToPlot = "cost_log_category",
+                       catMethod = "categorical",
+                       colourPalette = palette_colors_alpha,
+                       missingCountryCol = "white",
+                       mapRegion = "world",
+                       borderCol = "black", # More black country borders
+                       lwd = 0.5, 
+                       addLegend = F) # Line width of country borders
+
+
+
+
+#### Management plot
+management1
+
+management1 <- rbind(inva[inva$Type_of_cost_merged == "Management", ] , management)
+
+world_map <- getMap()
+
+summary_data <- aggregate(billion ~ Official_country, management1, sum)
+range(summary_data$billion) # 0.000000096   12.49
+
+# Join your summary data with the world map
+summary_data$Official_country[summary_data$Official_country== 'Czechia'] = 'Czech Republic'
+summary_data$Official_country[summary_data$Official_country== 'Viet Nam'] = 'Vietnam'
+summary_data$Official_country[summary_data$Official_country== 'Brunei Darussalam'] = 'Brunei'
+#summary_data$Official_country[summary_data$Official_country== 'Eswatini'] = 'Vietnam'
+#summary_data$Official_country[summary_data$Official_country== 'Greenland'] = 'Vietnam'
+summary_data$Official_country[summary_data$Official_country== 'Guinea-Bissau'] = 'Guinea Bissau'
+summary_data$Official_country[summary_data$Official_country== 'Iran, Islamic Republic of'] = 'Iran'
+summary_data$Official_country[summary_data$Official_country== 'Korea, Republic of'] = 'South Korea'
+summary_data$Official_country[summary_data$Official_country== 'Micronesia, Federated States of'] = 'Federated States of Micronesia'
+summary_data$Official_country[summary_data$Official_country== 'Russian Federation'] = 'Russia'
+summary_data$Official_country[summary_data$Official_country== 'Serbia'] = 'Republic of Serbia'
+#summary_data$Official_country[summary_data$Official_country== 'Syrian Arab Republic'] = 'Vietnam'
+summary_data$Official_country[summary_data$Official_country== 'Tanzania, United Republic of'] = 'United Republic of Tanzania'
+summary_data$Official_country[summary_data$Official_country== 'Timor-Leste'] = 'East Timor'
+summary_data$Official_country[summary_data$Official_country== 'United Kingdom of Great Britain and Northern Ireland'] = 'United Kingdom'
+summary_data$Official_country[summary_data$Official_country== 'Cape verde'] = 'Cape Verde'
+
+setdiff(summary_data$Official_country, world_map$SOVEREIGNT)
+
+summary_data<- summary_data %>% filter(!Official_country %in% c("Eswatini","Greenland","Syrian Arab Republic"))
+
+world_map$cost_bil <- summary_data$billion[match(world_map$SOVEREIGNT, summary_data$Official_country)]
+
+
+world_map$cost_log <- log(world_map$cost_bil + 1) # Adding 1 to avoid log(0)
+
+
+
+# Create a categorical variable using these breaks
+world_map$cost_log_category <- cut(world_map$cost_log, breaks = log_breaks, include.lowest = TRUE)
+
+plot <- mapCountryData(world_map, 
+                       nameColumnToPlot = "cost_log_category",
+                       catMethod = "categorical",
+                       colourPalette = palette_colors_alpha,
+                       missingCountryCol = "white",
+                       mapRegion = "world",
+                       borderCol = "black", # More black country borders
+                       lwd = 0.5, 
+                       addLegend = F) # Line width of country borders
+
+labels <- sprintf("%.2f", exp(log_breaks) - 1)
+labels[1] <- "<0.01" # Change the first label
+
+legend("topleft", legend = labels, fill = palette_colors, title = "Economic cost ($USD billion)", cex = 1.2, bty = "n", seg.len = 5)
+
+
+# [1] "<0.01" "1.05"  "3.21"  "7.65"  "16.76" "35.46" "73.86"
+
+
+
+
+### Just management invacost
+
+management1 <- rbind(inva[inva$Type_of_cost_merged == "Management", ] , management)
+management11 <- management1 %>% filter(type=="Invacost")
+
+
+world_map <- getMap()
+
+summary_data <- aggregate(billion ~ Official_country, management11, sum)
+range(summary_data$billion) # 0.00000009   5.5815
+
+# Join your summary data with the world map
+summary_data$Official_country[summary_data$Official_country== 'Czechia'] = 'Czech Republic'
+summary_data$Official_country[summary_data$Official_country== 'Viet Nam'] = 'Vietnam'
+summary_data$Official_country[summary_data$Official_country== 'Brunei Darussalam'] = 'Brunei'
+#summary_data$Official_country[summary_data$Official_country== 'Eswatini'] = 'Vietnam'
+#summary_data$Official_country[summary_data$Official_country== 'Greenland'] = 'Vietnam'
+summary_data$Official_country[summary_data$Official_country== 'Guinea-Bissau'] = 'Guinea Bissau'
+summary_data$Official_country[summary_data$Official_country== 'Iran, Islamic Republic of'] = 'Iran'
+summary_data$Official_country[summary_data$Official_country== 'Korea, Republic of'] = 'South Korea'
+summary_data$Official_country[summary_data$Official_country== 'Micronesia, Federated States of'] = 'Federated States of Micronesia'
+summary_data$Official_country[summary_data$Official_country== 'Russian Federation'] = 'Russia'
+summary_data$Official_country[summary_data$Official_country== 'Serbia'] = 'Republic of Serbia'
+#summary_data$Official_country[summary_data$Official_country== 'Syrian Arab Republic'] = 'Vietnam'
+summary_data$Official_country[summary_data$Official_country== 'Tanzania, United Republic of'] = 'United Republic of Tanzania'
+summary_data$Official_country[summary_data$Official_country== 'Timor-Leste'] = 'East Timor'
+summary_data$Official_country[summary_data$Official_country== 'United Kingdom of Great Britain and Northern Ireland'] = 'United Kingdom'
+summary_data$Official_country[summary_data$Official_country== 'Cape verde'] = 'Cape Verde'
+
+setdiff(summary_data$Official_country, world_map$SOVEREIGNT)
+
+summary_data<- summary_data %>% filter(!Official_country %in% c("Eswatini","Greenland","Syrian Arab Republic"))
+
+world_map$cost_bil <- summary_data$billion[match(world_map$SOVEREIGNT, summary_data$Official_country)]
+
+
+world_map$cost_log <- log(world_map$cost_bil + 1) # Adding 1 to avoid log(0)
+
+
+# Create a categorical variable using these breaks
+world_map$cost_log_category <- cut(world_map$cost_log, breaks = log_breaks, include.lowest = TRUE)
+
+plot <- mapCountryData(world_map, 
+                       nameColumnToPlot = "cost_log_category",
+                       catMethod = "categorical",
+                       colourPalette = palette_colors_alpha,
+                       missingCountryCol = "white",
+                       mapRegion = "world",
+                       borderCol = "black", # More black country borders
+                       lwd = 0.5, 
+                       addLegend = F) # Line width of country borders
+
+labels <- sprintf("%.2f", exp(log_breaks) - 1)
+labels[1] <- "<0.01" # Change the first label
+
+legend("topleft", legend = labels, fill = palette_colors, title = "Economic cost ($USD billion)", cex = 1.2,
+       bty = "n", seg.len = 5)
+
+par(mfrow = c(2, 2))
+
+
+
+par(mfrow = c(1, 1))
+labels <- sprintf("%.2f", exp(log_breaks) - 1)
+labels[1] <- "<0.01"
+legend("topleft", legend = labels, fill = palette_colors, title = "Economic cost ($USD billion)", cex = 1.2,
+       bty = "n", seg.len = 5)
+
+
+
+
+
+
+
+
+# Figure 3: # time since invasion plot ####
+
+df <- data.frame(
+  Coefficient = c('b0', 'b0', 'b1', 'b1'),
+  Type = c('damage', 'management', 'damage', 'management'),
+  Value = c(-84.42, -11.109, 274.28, 21.71))
+
+
+ggplot(df, aes(x = Coefficient, y = Value, fill = Type)) +
+  geom_bar(stat = 'identity', color="black") +
+  geom_text(aes(label=sprintf("%.2f", Value)), vjust=1.6, color="black", size=4.5) +
+  ylab('Coefficients') +
+  theme_bw() +
+  theme(axis.text = element_text(size=12),
+        axis.title = element_text(size=12)) +
+  geom_hline(yintercept=0, linetype="dashed", color = "grey45", size= 1) +
+  scale_y_continuous(breaks = seq(-100, 300, by = 50)) +
+  scale_x_discrete(labels = c(expression(italic("constant time (b"[0]*")")), expression(italic("time-dependent (b"[1]*")")))) +
+  scale_fill_brewer(palette="Set2", name="Type of cost", labels = c("Damage", "Management"))
+
+
+
+
+scale_x_discrete(labels = c(expression("constant time" italic("b0"))), expression(italic("time-dependent (b"[1]*")")))) +
+  
+
+
+
+#### #### Figure 4: Taxonomic species #### ## #### 
+
+data <- rbind(damage1, management1)
+
+unique(data$Species)
+
+setwd("C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost")
+sp <- read_xlsx("Species_ID.xlsx")
+sp <- sp[, c(1,4)]
+colnames(sp)[1] <- "Species"
+sp <- sp[!duplicated(sp$Species), ]
+
+data_combined <- data %>% 
+  left_join(sp, by = "Species")
+
+na_rows <- data_combined %>% 
+  filter(is.na(Order))
+
+unique(data_combined$Order)
+
+all_rows <- data_combined %>% 
+  filter(Order =="All_density")
+
+unique(all_rows$Species)
+
+# Fill in the missing 'Order' values based on specific species
+data_filled <- data_combined %>%
+  mutate(
+    Order = case_when(
+      Species == "Eichhornia crassipes" ~ "Plants",
+      Species == "Tuta absoluta" ~ "Arthropods",
+      Species == "Neovison vison" ~ "Mammalia",
+      Species == "Sturnus vulgaris" ~ "Birds",
+      Species == "Columba livia" ~ "Birds",
+      Species == "Petromyzon marinus" ~ "Fish",
+      Species == "Pomacea canaliculata" ~ "Mollusks",
+      Species == "Psittacula krameri" ~ "Birds",
+      Species == "Arion lusitanicus" ~ "Mollusks",
+      Species == "Phasianus colchicus" ~ "Birds",
+      Species == "Branta canadensis" ~ "Birds",
+      Species == "Corbicula fluminea" ~ "Mollusks",
+      Species == "Passer domesticus" ~ "Birds",
+      Species == "Alopochen aegyptiaca" ~ "Birds",
+      Species == "Cygnus olor" ~ "Birds",
+      Species == "Dreissena polymorpha" ~ "Mollusks",
+      Species == "Oxyura jamaicensis" ~ "Birds",
+      Species == "Myiopsitta monachus" ~ "Birds",
+      Species == "Lissachatina fulica" ~ "Mollusks",
+      Species == "Phoxinus phoxinus" ~ "Fish",
+      Species == "Pseudorasbora parva" ~ "Fish",
+      Species == "Tinca tinca" ~ "Fish",
+      TRUE ~ as.character(Order)
+    )
+  )
+
+unique(data_filled$Order)
+
+
+
+# All species: 
+a<- data_filled %>%
+  group_by(Order) %>%
+  summarise(Cost = sum(billion)) %>% mutate(Percentage = Cost/sum(Cost) * 100 ) # Interpolated
+
+
+# Filter for 'Damage' and group by 'Order' and 'type'
+grouped_data_damage <- data_filled %>%
+  filter(Type_of_cost_merged == "Damage") %>%
+  group_by(Order, type) %>%
+  summarise(total_cost = sum(billion, na.rm = TRUE)) %>%
+  arrange(-total_cost)
+
+
+ggplot(grouped_data_damage, aes(x = reorder(Order, -total_cost), y = total_cost, fill = type)) +
+  geom_bar(stat = "identity", position = "stack", color= "black") +
+  scale_fill_brewer(palette="Set2", name="Type of cost", labels = c("Interpolated", "InvaCost"))+
+  labs(
+    x = "Order",
+    y = "Total Cost (Billion)",
+    fill = "Type of Cost"
+  ) +
+  theme_bw() + 
+  theme(axis.text = element_text(size=12), 
+        axis.title = element_text(size=12))
+
+
+
+grouped_data_management <- data_filled %>%
+  filter(Type_of_cost_merged == "Management") %>%
+  group_by(Order, type) %>%
+  summarise(total_cost = sum(billion, na.rm = TRUE)) %>%
+  arrange(-total_cost)
+
+
+ggplot(grouped_data_management, aes(x = reorder(Order, -total_cost), y = total_cost, fill = type)) +
+  geom_bar(stat = "identity", position = "stack", color= "black") +
+  scale_fill_brewer(palette="Set2", name="Type of cost", labels = c("Interpolated", "InvaCost"))+
+  labs(
+    x = "Order",
+    y = "Total Cost (Billion)",
+    fill = "Type of Cost"
+  ) +
+  theme_bw()+
+  theme(axis.text = element_text(size=12), 
+        axis.title = element_text(size=12))
+
+# facet wrap
+grouped_data <- data_filled %>%
+  group_by(Order, Type_of_cost_merged, type) %>%
+  summarise(total_cost = sum(billion, na.rm = TRUE)) %>%
+  arrange(-total_cost)
+
+
+ggplot(grouped_data, aes(x = reorder(Order, -total_cost), y = total_cost, fill = type)) +
+  geom_bar(stat = "identity", position = "stack", color= "black") +
+  scale_fill_brewer(palette="Set2", name="Type of cost", labels = c("Interpolated", "InvaCost"))+
+  labs(
+    x = "Order",
+    y = "Total Cost (Billion)",
+    fill = "Type of cost"
+  ) +
+  theme_bw() +theme(axis.text = element_text(size=12), 
+                    axis.title = element_text(size=12))+
+  facet_wrap(~ Type_of_cost_merged, scales = "free", nrow  = 1)
+
+
+z <- grouped_data %>%
+  group_by(Order, Type_of_cost_merged) %>%
+  summarise(Cost = sum(total_cost)) %>%
+  group_by(Type_of_cost_merged) %>%
+  mutate(Percentage = Cost / sum(Cost) * 100)
+
+
+
+
+
+
+
+################## Cost per spatial unit #######################################
+
+data
+library(raster)
+library(sf)
+
+data=data[data$type=="Invacost" [ data$billion<5000,]]
+
+data0 <- data[!(data$type == "Invacost" & data$billion >= 5), ]
+
+
+
+data1<- data0 %>% group_by(Species, Official_country, Type_of_cost_merged) %>% summarise(
+  Cost =sum(billion))
+
+
+
+spn <- unique(data$Species) # 162
+n <- spn[1]
+
+
+world <- st_read(dsn = "C:/Users/Propietario/Downloads/World_Countries_Generalized.shp")
+world <- world[,c(1,4,5)]
+
+
+setdiff(data$Official_country,world$COUNTRYAFF)
+
+
+data$Official_country[data$Official_country== "Czech Republic" ] = 'Czechia'
+data$Official_country[data$Official_country== 'United States of America'] = 'United States'
+data$Official_country[data$Official_country== 'Vietnam'] = 'Viet Nam'
+data$Official_country[data$Official_country== 'Brunei'] = 'Brunei Darussalam'
+data$Official_country[data$Official_country== 'Iran'] = 'Iran, Islamic Republic of'
+data$Official_country[data$Official_country== 'Democratic Republic of the Congo'] = 'Congo, The Democratic Republic of the'
+data$Official_country[data$Official_country== 'Bolivia'] = 'Bolivia, Plurinational State of'
+data$Official_country[data$Official_country== 'Russia'] = 'Russian Federation'
+data$Official_country[data$Official_country== 'Republic of Serbia'] = 'Serbia'
+data$Official_country[data$Official_country== 'Laos'] = "Lao People's Democratic Republic"
+data$Official_country[data$Official_country== 'East Timor'] = 'Timor-Leste'
+data$Official_country[data$Official_country== 'Macedonia'] = 'North Macedonia'
+data$Official_country[data$Official_country== 'Turkey'] = 'Turkiye'
+data$Official_country[data$Official_country== 'Ivory Coast'] = "Côte d'Ivoire"
+data$Official_country[data$Official_country== 'South Korea'] = "Korea, Democratic People's Republic of"
+data$Official_country[data$Official_country== 'Venezuela'] = 'Venezuela, Bolivarian Republic of'
+data$Official_country[data$Official_country== 'Moldova'] = 'Moldova, Republic of'
+data$Official_country[data$Official_country== 'Cape Verde'] = 'Cabo Verde'
+data$Official_country[data$Official_country== 'United Kingdom of Great Britain and Northern Ireland'] = 'United Kingdom'
+data$Official_country[data$Official_country== 'United Republic of Tanzania'] = 'Tanzania, United Republic of'
+
+Cost_km2_total <- data.frame()
+
+for (h in unique(data1$Type_of_cost_merged)) {
+  data2 <- data1[data1$Type_of_cost_merged == h, ]
+  
+  # Loop through each species
+  for (n in spn) {
+    df1 <- data2[data2$Species == n, ]
+    countries <- unique(df1$Official_country)
+  
+  raster_file <- paste0("prediction_", n, ".tif")
+raster_path <- file.path("C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost/New_results/Raster_model", raster_file)
+  
+  if (file.exists(raster_path)) {
+    prediction_raster <- raster(raster_path)
+    raster <- raster(extent(prediction_raster), res = 0.08333)
+    
+    for (country in countries) {
+      species_country <- df1[df1$Official_country == country, ]
+      
+      world1 <- world %>% filter(COUNTRYAFF == country)
+      
+      if (nrow(world1) > 0) {
+        world1$COUNTRYAFF <- as.factor(world1$COUNTRYAFF)
+        world1 <- world1 %>%
+          mutate(COUNTRYAFF_NUM = as.numeric(as.factor(COUNTRYAFF)))
+        
+        #I want to obtain the mean latitude: 
+        mean_latitudes <- lapply(world1$geometry, function(polygon) {
+          # Extract all coordinates for the polygon
+          coords <- st_coordinates(polygon)
+          
+          # Extract the latitude values (second column of the coords matrix)
+          latitudes <- coords[,2]
+          
+          # Calculate and return the mean latitude
+          mean(latitudes)
+        })
+        
+        # Convert the list to a vector and add it to the dataframe
+        
+        lat <- unlist(mean_latitudes)
+        lat <- mean(lat)
+        lat_rad <- numeric(length(lat))
+        lat_rad <- ifelse(lat < 0, lat * (pi/180) * -1, lat * (pi/180))
+        
+        Area_cell <- 111.1 * 111.3 * cos(lat_rad)  
+        
+        
+        
+        rasterized <- rasterize(world1, raster, field = "COUNTRYAFF_NUM")
+        
+        country_values <- getValues(rasterized)
+        
+        prediction_raster$new_column <- country_values
+        
+        mask <- prediction_raster[[2]] == 1
+        filtered_values <- prediction_raster[[1]][mask]
+        
+        if (length(filtered_values) > 0) {
+          suitability <- filtered_values %>% as.data.frame()
+          
+          A_prime_ci <- sum(suitability$., na.rm=TRUE) 
+          
+          
+          # Conversion to km²
+          #Area_cell <- 9.259 ^ 2  # Aproxx to my res 0.0833
+          suitable_area_cell = as.numeric(A_prime_ci) * Area_cell
+          
+          Cost_km2 <- species_country$Cost / suitable_area_cell
+          
+          Cost_per_km2 <- data.frame(Cost = Cost_km2)
+          
+          Cost_per_km2$country <- country
+          Cost_per_km2$species <- n
+          Cost_per_km2$Type_of_cost <- h  
+          Cost_per_km2$A_prime_ci <- A_prime_ci
+          Cost_per_km2$suitable_area_cell <- suitable_area_cell
+          
+          
+          Cost_km2_total <- rbind(Cost_km2_total, Cost_per_km2)
+        }
+        cat("*")
+      }
+    }
+  }
+}
+}
+
+
+
+Cost_km2_total1 <- Cost_km2_total %>% 
+  group_by(species, Type_of_cost) %>% 
+  summarise(Mean_cost_km2 = mean(Cost[is.finite(Cost)])*1000000000)  # Filter out Inf and calculate mean
+
+Cost_km2_total %>% group_by(country) %>% summarise(Mean_cost_km2= mean(Cost)) #mean cost per country
+
+
+
+Cost_km2_total0 <- Cost_km2_total[is.finite(Cost_km2_total$Cost), ]
+
+Cost_km2_total00<- Cost_km2_total0 %>% filter(!suitable_area_cell <1)
+
+
+
+Cost_km2_total000<- Cost_km2_total00 %>% group_by(species, Type_of_cost) %>% 
+  summarise(Mean_cost_km2 = mean(Cost)*1000000000 )
+
+
+
+df <- Cost_km2_total000
+
+# Plot
+
+df1<- df %>%
+  group_by(Type_of_cost, species) %>%
+  summarise(Mean_cost_km2 = mean(Mean_cost_km2, na.rm = TRUE)) %>%
+  arrange(Type_of_cost, desc(Mean_cost_km2)) %>%
+  group_by(Type_of_cost) %>%
+  slice_head(n = 5)
+
+
+
+
+
+desired_order <- c("Coptotermes formosanus","Frankliniella occidentalis", "Herpestes edwardsi",  "Adelges piceae", 
+                   "Tuta absoluta", "Neovison vison",
+                   "Phelipanche aegyptiaca","Cryptotermes brevis","Aedes aegypti","Sirex noctilio")
+
+df1$species <- factor(df1$species, levels = desired_order)
+
+
+y_breaks <- seq(10, max(df1$Mean_cost_km2, na.rm = TRUE), by = 10)
+
+damage <- mean(df1$Mean_cost_km2[df1$Type_of_cost == "Damage"])
+
+management <- mean(df1$Mean_cost_km2[df1$Type_of_cost == "Management"])
+
+# Create the plot
+ggplot(data = df1, aes(x = species, y = Mean_cost_km2)) +
+  geom_point(aes(color = Type_of_cost), size = 8) +
+  geom_segment(aes(xend = species, yend = 0, color = Type_of_cost), size=2) +
+  geom_hline(yintercept = damage, linetype="dashed", color = "red", alpha = 0.5, size= 0.8) +
+  geom_hline(yintercept = management, linetype="dashed", color = "blue", alpha = 0.5, size= 0.8) +
+  scale_y_log10() + 
+  scale_fill_brewer(palette="Set2", name="Type of cost", labels = c("Damage", "Management")) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12, face = "italic"), # Make text italic
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 12, face = "bold")
+  ) +
+  labs(y = expression(paste("Economic cost per km"^"2")), x = NULL) + # Make "2" superscript
+  annotation_logticks(sides = "l", short = unit(1,"mm"),
+                      mid = unit(2,"mm"),
+                      long = unit(3,"mm"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
