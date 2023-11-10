@@ -178,36 +178,53 @@ values(prediction_raster) <- prediction_matrix
 #auc<- roc(binary_predictions, pred_probs, na.rm=T)$auc
 #AUC_df <- rbind(AUC_df, data.frame(species = n, auc = auc))
 
-## Cross validation 
+ ## Cross validation 
+  
+  numFolds <- trainControl(method = "cv", number = 5)
+  cvFolds <- createFolds(train_data$presence, k = 5)
+  
+  tss <- vector()
+  auc <- vector()
+  #folds
+  for(i in 1:5){
+    
+    # Partition the data
+    trainIndex <- cvFolds[[i]]
+    cvTrainData <- train_data[trainIndex, ]
+    cvTestData <- train_data[-trainIndex, ]
+    
+    # Fit the model
+    GAM_model <- gam(presence ~ s(bioclim.bio2, k = 5) + s(bioclim.bio3, k = 5) + 
+                       s(bioclim.bio8, k = 5) + s(bioclim.bio9, k = 5) + s(bioclim.bio13, 
+                                                                           k = 5) + s(bioclim.bio14, k = 5) + s(bioclim.bio15, k = 5) + 
+                       s(bioclim.bio18, k = 5) + s(bioclim.bio19, k = 5) + s(Elevation, 
+                                                                             k = 5) + s(Slope, k = 5) + s(Roads, k = 5), 
+                     family = binomial(link = 'logit'), 
+                     data = cvTrainData)
+    
+    # Make predictions
+    pred <- predict(GAM_model, newdata = cvTestData, type = "response")
+    
+    # Compute AUC and store it
+    roc_obj <- roc(cvTestData$presence, pred)
+    auc[i] <- auc(roc_obj)
+    
+    
+    pred_class <- ifelse(pred > 0.5, 1, 0)  # Adjust the threshold if needed
 
-numFolds <- trainControl(method = "cv", number = 5)
-cvFolds <- createFolds(train_data$presence, k = 5)
-
-auc <- vector()
-#folds
-for(i in 1:5){
-  
-  # Partition the data
-  trainIndex <- cvFolds[[i]]
-  cvTrainData <- train_data[trainIndex, ]
-  cvTestData <- train_data[-trainIndex, ]
-  
-  # Fit the model
-  GAM_model <- gam(presence ~ s(bioclim.bio2, k = 5) + s(bioclim.bio3, k = 5) + 
-                     s(bioclim.bio8, k = 5) + s(bioclim.bio9, k = 5) + s(bioclim.bio13, 
-              k = 5) + s(bioclim.bio14, k = 5) + s(bioclim.bio15, k = 5) + 
-                     s(bioclim.bio18, k = 5) + s(bioclim.bio19, k = 5) + s(Elevation, 
-     k = 5) + s(Slope, k = 5) + s(Roads, k = 5), 
-                   family = binomial(link = 'logit'), 
-                   data = cvTrainData)
-  
-  # Make predictions
-  pred <- predict(GAM_model, newdata = cvTestData, type = "response")
-  
-  # Compute AUC and store it
-  roc_obj <- roc(cvTestData$presence, pred)
-  auc[i] <- auc(roc_obj)
-  cat("*")
+    # Compute confusion matrix
+    cm <- confusionMatrix(as.factor(pred_class), as.factor(cvTestData$presence))
+    
+    # Calculate Sensitivity and Specificity
+    sensitivity <- cm$table[2, 2] / (cm$table[2, 2] + cm$table[1, 2])
+    specificity <- cm$table[1, 1] / (cm$table[1, 1] + cm$table[2, 1])
+    
+    # Calculate TSS and store it
+    tss[i] <- sensitivity + specificity - 1
+    cat("*")
+  }
+  AUC_df <- rbind(AUC_df, data.frame(species = n, mean_auc = mean(auc),sd_auc = sd(auc),
+                                                 mean_tss = mean(tss), sd_tss = sd(tss) ))
 }
 AUC_df <- rbind(AUC_df, data.frame(species = n, auc = mean(auc)))
 
