@@ -4,6 +4,29 @@
 
 
 
+install.packages("httr")
+library(httr)
+library(httr)
+library(jsonlite)
+
+api_url <- "https://io.biodiversite-quebec.ca/stac/collections/gbif_heatmaps/items"
+
+response <- GET(api_url)
+
+if (status_code(response) == 200) {
+  data <- content(response, "text", encoding = "UTF-8")
+  data_json <- fromJSON(data, flatten = FALSE)
+  
+  tiff_links <- lapply(data_json$features, function(item) item$links[[length(item$links)]]$href)
+  
+  # In fact, I fuck the code somewhere but I am not sure where, inspecting the data_json can dowload the file
+  for (i in seq_along(tiff_links)) {
+    cat("TIFF link", i, ":", tiff_links[[i]], "\n")
+  }
+download.file(tiff_links[7], "file.tif")
+
+
+
 ##Lets read now the file:
 GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_all_density_06-2022.tif"
 GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_amphibians_density_06-2022.tif"
