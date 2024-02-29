@@ -1,0 +1,149 @@
+# Other predictors -------------------- Note: I have two elevation and two evapotrans
+
+bio
+grid_extent <- extent(-180, 180, -60, 90)  
+
+
+#Elevation
+setwd("C:/Users/isma-/Downloads")
+elevation <- rgdal::readOGR("gmted2010.shp")
+elevation <- crop(elevation, grid_extent) #crop to the dimension of BIOCLIM
+
+elevation_raster <- raster(extent(elevation), resolution = c(0.08333333, 0.08333333)) 
+
+
+###### Evapotranspiration
+#file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Global-AI_ET0_v3_annual/et0_v3_yr.tif"
+
+#Evapotranspiration <- raster(file_path)
+#plot(Evapotranspiration)
+
+#Evapotranspiration <- crop(Evapotranspiration, grid_extent) #crop to the dimension of BIOCLIM
+#Evapotranspiration <- projectRaster(Evapotranspiration, bioc, method = "bilinear") #re-proyect
+
+#plot(Evapotranspiration)
+
+
+
+# Or use CHELSA DATABASE ----
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/CHELSA_pet_penman_mean_1981-2010_V.2.1.tif"
+
+Evapotranspiration <- raster(file_path)
+plot(Evapotranspiration)
+
+Evapotranspiration <- crop(Evapotranspiration, grid_extent) #crop to the dimension of BIOCLIM
+Evapotranspiration <- projectRaster(Evapotranspiration, bioc, method = "bilinear") #re-proyect
+Evapotranspiration <- setNames(Evapotranspiration, "Evapotranspiration")
+plot(Evapotranspiration)
+
+
+
+##### Slope  ##### 
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/slope_1KMmd_GMTEDmd.tif"
+
+Slope <- raster(file_path)
+plot(Slope)
+
+Slope <- crop(Slope, grid_extent) #crop to the dimension of BIOCLIM
+Slope <- projectRaster(Slope, bioc, method = "bilinear") #re-proyect
+Slope <- setNames(Slope, "Slope")
+plot(Slope)
+
+
+##### Elevation ##### 
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/elevation_1KMmd_GMTEDmd.tif"
+
+Elevation <- raster(file_path)
+plot(Elevation)
+
+Elevation <- crop(Elevation, grid_extent) #crop to the dimension of BIOCLIM
+Elevation <- projectRaster(Elevation, bio, method = "bilinear") #re-proyect
+Elevation <- setNames(Elevation, "Elevation")
+plot(Elevation)
+
+
+
+##### Rugosity ##### 
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/roughness_1KMmd_GMTEDmd.tif"
+
+Rugosity <- raster(file_path)
+plot(Rugosity)
+
+Rugosity <- crop(Rugosity, grid_extent) #crop to the dimension of BIOCLIM
+Rugosity <- projectRaster(Rugosity, bio, method = "bilinear") #re-proyect
+Rugosity <- setNames(Rugosity, "Rugosity")
+plot(Rugosity)
+
+
+
+#### Distance to the roads --> https://sedac.ciesin.columbia.edu/data/set/groads-global-roads-open-access-v1
+road_map <- st_read("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/groads-v1-global-gdb/groads-v1-europe-shp/gROADS-v1-europe.shp")
+road_map <- st_read("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/Roads.shp")
+
+
+
+setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road")
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/Final_layer_Roads.tif"
+
+Roads <- raster(file_path)
+
+Roads <- crop(Roads, grid_extent) #crop to the dimension of BIOCLIM
+Roads <- projectRaster(Roads, bio, method = "bilinear") #re-proyect
+Roads <- setNames(Roads, "Roads")
+
+
+
+##### Check collinearity ----------
+
+
+###### Predictors ######
+bio <- raster::getData('worldclim', var='bio', res=5)
+
+#In case we want to drop some layer before
+#remove <- c("bio1","bio2","bio3","bio10")
+#bio <- raster::dropLayer(bio, remove)
+grid_extent <- extent(-180, 179, -56, 84)
+
+
+#resample
+bio_resampled <- resample(bio, bio)
+Elevation_resampled <- resample(Elevation, bio)
+Slope_resampled <- resample(Slope, bio)
+Evapotranspiration_resampled <- resample(Evapotranspiration, bio)
+Rugosity_resampled <- resample(Rugosity, bio)
+Roads <- resample(Roads, bio)
+
+#crops
+Roads <- crop(Roads, grid_extent) 
+Elevation_resampled <- crop(Elevation_resampled, grid_extent) 
+Slope_resampled <- crop(Slope_resampled, grid_extent) 
+Evapotranspiration_resampled <- crop(Evapotranspiration_resampled, grid_extent) 
+Rugosity_resampled <- crop(Rugosity_resampled, grid_extent) 
+bio_resampled <- crop(bio_resampled, grid_extent) 
+
+
+predictors <- stack(bio_resampled, 
+                    Elevation_resampled, 
+                    Slope_resampled,
+                    Evapotranspiration_resampled,
+                    Rugosity_resampled,
+                    Roads) # need to change the name later
+
+
+## correlation
+library(usdm)
+
+v <- vifstep(predictors) 
+vif(predictors) 
+v
+
+
+drop <- c("bio1","bio4","bio5","bio6","bio10","bio11","bio16","bio17")
+bioc <- exclude(predictors,v) #exclude the correlated variables using th = 10.
+
+
+bioc
+
+output_file <- "predictors1.tif"
+
+writeRaster(predictors, filename = output_file, format = "GTiff",overwrite=TRUE )
