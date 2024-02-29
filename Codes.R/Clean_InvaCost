@@ -1,0 +1,95 @@
+##########################################################################################
+#                                    INVACOST DATA
+##########################################################################################
+
+#Get InvaCost
+invacost<- invacost::getInvaCostVersion(version = "4.1")
+
+
+### Cleaning steps
+# Eliminating data with no information on starting and ending years
+invacost <- invacost[-which(is.na(invacost$Probable_starting_year_adjusted)), ]
+invacost <- invacost[-which(is.na(invacost$Probable_ending_year_adjusted)), ]
+
+# Eliminating data with no usable cost value
+invacost <- invacost[-which(is.na(invacost$Cost_estimate_per_year_2017_USD_exchange_rate)), ]
+
+
+#Remove not usseful species records:
+invacost<-invacost[!grepl("/", invacost$Species),]
+invacost<-invacost[!grepl("sp.", invacost$Species),]
+invacost<-invacost[!grepl("spp.", invacost$Species),]
+
+
+unique(invacost$Species) # 811 species
+
+table(invacost$Environment_IAS)
+table(invacost$Kingdom)
+table(invacost$Species) #records per species
+
+unique(invacost$Official_country)
+table(invacost$Geographic_region)
+
+#### Filter out microorganism
+micro <- c("Bacteria","Chromista","Ortharnavirae","Ortharnavirae","Orthornavirae",
+           "Diverse/Unspecified","Viruses","Fungi")
+
+invacost <- invacost %>% filter(!Kingdom %in% micro)
+table(invacost$Kingdom)
+
+unique(invacost$Species) ### 734 
+
+
+##### Remove Marine species
+marine <- c("Amphibalanus improvisus","Magallana gigas","Mnemiopsis leidyi","Prymnesium polylepis",
+            "Prymnesium polylepis","Caulerpa taxifolia","Callinectes sapidus","Undaria pinnatifida",
+            "Limnoperna fortunei","Pterois volitans","Lagocephalus sceleratus","Red tide","Styela clava",
+            "Sargassum muticum","Portunus pelagicus","Ascophyllum nodosum","Didemnum vexillum",
+            "Crepidula porcellana","Rhopilema nomadica","Ciona intestinalis","Codium fragile",
+            "Paralithodes camtschaticus","Carcinus maenas","Pseudochattonella verruculosa",
+            "Teredo navalis","Cercopagis pengoi","Zostera japonica","Sabella spallanzanii",
+            "Elodea canadensis","Mytilopsis sallei", "Eriocheir sinensis")
+
+
+invacost <- invacost %>% filter(!Species %in% marine)
+
+unique(invacost$Species) ### 711 
+
+
+
+###### Apply reliability filters to InvaCost:
+
+invacost<- invacost %>% filter(Implementation=="Observed") %>% filter(Method_reliability =="High")
+
+unique(invacost$Species) ### 553 
+
+
+### Country vs site scale 
+
+unique(invacost$Spatial_scale)
+
+scale <- c("Country", "Site")
+
+invacost<- invacost %>% filter(Spatial_scale %in% scale)
+
+Species_scale <- invacost %>% group_by(Species, Spatial_scale) %>% summarise(N_sp = n()) %>% 
+  group_by(Spatial_scale) %>% summarise(N_sp = n()) #204 species vs. 403
+
+invacost<- invacost %>% filter(Spatial_scale =="Country")
+
+unique(invacost$Species) # 204 Species
+
+error_species <- c("Scirtothrips perseae","Bactrocera philippinensis","Culicoides imicola", 
+                   "Teia anartoides","Prostephanus truncatus")  #Not coordinates...
+
+
+invacost<- invacost %>% filter(!Species %in% error_species)
+invacost<- invacost %>% filter(!Species == "Thaumetopoea processionea") #diverse country
+
+# Not run !-----
+species_less_10_grids<-c("Neovison vison", "Bursaphelenchus mucronatus", "Halotydeus destructor", "Anthonomus grandis", "Rhipicephalus microplus", "Cochliomyia hominivorax", "Phenacoccus solenopsis", "Pectinophora gossypiella", "Liriomyza sativae", "Trogoderma granarium", "Listronotus bonariensis", "Maconellicoccus hirsutus", "Eichhornia crassipes", "Acacia nilotica", "Raoiella indica", "Anopheles darlingi", "Anastrepha fraterculus", "Varroa jacobsoni", "Nilaparvata lugens", "Eupatorium adenophorum", "Rastrococcus invadens", "Aleurodicus rugioperculatus", "Thrips palmi", "Tuta absoluta", "Liriomyza huidobrensis", "Paracoccus marginatus", "Gyrodactylus salaris", "Chilo partellus", "Plectranthus parviflorus", "Globodera rostochiensis", "Hypothenemus hampei", "Heracleum sosnowskyi", "Coptotermes gestroi")
+invacost<- invacost %>% filter(!Species %in% species_less_10_grids)
+unique(invacost$Species) # 165 Species
+
+invacost<- invacost %>% filter(!Species == "Varroa destructor") #Miss clasified sp (acari)
+unique(invacost$Species) # 164 Species
