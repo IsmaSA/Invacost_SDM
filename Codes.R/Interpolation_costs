@@ -1,0 +1,1194 @@
+# Last code from Brian
+
+rm_outlier=T
+#oname=""
+oname="test2_"
+source("funcs.R")
+
+if(rm_outlier==T){
+	nm_outlier="rm_outl_"
+}else{
+	nm_outlier=""
+}
+
+#Load datasets: 
+eu.df <- read_xlsx("eu.df2.xlsx")
+
+##### try 2.0
+expanded
+expanded<-expanded[,c(1,3,20,30,31, 39,40,57,68,69)]
+
+expanded <- expanded %>%
+  group_by(Species, Official_country, Type_of_cost_merged, Impact_year) %>%
+  mutate(cost_bil = sum(cost_bil))
+
+expanded <- expanded[!duplicated(expanded[c("Impact_year", "Species","Official_country", "Type_of_cost_merged", "cost_bil")]), ]
+
+expanded = expanded  %>%  left_join(eu.df[,c(1,2,12,13,14,15)], by = c("Species", "Official_country"))
+names(expanded)
+expanded<- expanded %>%
+  distinct(Impact_year, Cost_ID, Species, Geographic_region, Official_country, Probable_starting_year_adjusted,
+           Probable_ending_year_adjusted, Type_of_cost_merged, cost, cost_bil, t,suitability,comb2,Outlier_comb2 )
+
+expanded = expanded %>%left_join(eu.df[,c(2,7:9)], by = c("Official_country"))
+expanded<- expanded %>%
+  distinct(Impact_year, Cost_ID, Species, Geographic_region, Official_country, Probable_starting_year_adjusted,
+Probable_ending_year_adjusted, Type_of_cost_merged, cost, cost_bil, t,suitability,comb2,Outlier_comb2, Agriculture,GDP,Pop_size )
+
+expanded <- expanded[!duplicated(expanded[c("Impact_year", "Cost_ID","cost_bil","Species","Official_country")]), ]
+
+
+eu.df <-expanded
+names(eu.df)
+str(eu.df)
+eu.df$Impact_year = as.numeric(eu.df$Impact_year)
+
+eu.df$t2= eu.df$Impact_year - eu.df$t
+eu.df$t2[eu.df$t2<0]=0
+
+#eu.df$Cost_estimate_per_year_2017_USD_exchange_rate=exp(eu.df$Cost_estimate_per_year_2017_USD_exchange_rate)/1000000
+if(rm_outlier==T){
+	eu.df=eu.df[ eu.df$Cost_estimate_per_year_2017_USD_exchange_rate<=5000,]
+	eu.df=eu.df[ eu.df$cost_bil<=5,] #me
+}
+##Give all the combinations of predictors (in order to tell scale_fit_fun what it should run)
+pos.pred <- c("GDP", "Pop_size", "Agriculture", "suitability","time","time2")
+
+pred.l <- list(m1= c(pos.pred[1]), m2= c(pos.pred[2]), m3= c(pos.pred[3]), m4= c(pos.pred[4]), m5= pos.pred[c(1,2)], m6= pos.pred[c(1,4)], 
+m7= pos.pred[c(1,3)],m8= pos.pred[c(4,2)], m9= pos.pred[c(4,3)], m10= pos.pred[c(2,3)], m11= pos.pred[c(1,3,4)], m12= pos.pred[c(1,2,3)], m13= pos.pred[c(1,2,4)],
+               m14= pos.pred[c(2,3,4)], m15= pos.pred[1:4]) #create all combinations of predictors
+
+tm_list=which(unlist(lapply(pred.l,function(x){return("suitability" %in% x)}))) #try suitability both with and without time
+
+for(i in tm_list){
+	pred.l[[paste0(i,"t")]]=c(pred.l[[i]],"time")
+	pred.l[[paste0(i,"t2")]]=c(pred.l[[i]],"time","time2")
+}
+
+full_gamma <-c(0,0,0,0,0,0,NA,.10) #named "full" gamma vector to make the optimization function (scale_fit_fun) faster
+names(full_gamma)=c(pos.pred, "sd","b0")
+full_gamma2=full_gamma 
+full_gamma2[] <-NA
+
+
+cost.types = unique(eu.df$Type_of_cost_merged)
+v.AIC.costtypes <- numeric(length(cost.types))
+names(v.AIC.costtypes) = cost.types
+
+results_df <- data.frame()
+
+eu.df$Cost_estimate_per_year_2017_USD_exchange_rate = eu.df$cost_bil * 1000
+#This code include the information for b0 and b1 
+  df.fit1 <- eu.df
+  eu.df$type <- "invacost"
+  df.fit1$type <- "extrapol"
+  df.fit.full <- rbind(eu.df, df.fit1)
+  
+  df.fit.full <- as.data.frame(df.fit.full)
+lst1=list()
+params2=list()
+for (i in cost.types[1]) {
+
+lst<-list()
+params<-list()
+source("loops.R")
+
+}
+
+## Damage
+dama <- readRDS("result_test2_rm_outl_Damage.rds")
+dama<- dama %>% filter(Model==29)
+
+dama1 <- readRDS("params_test2_rm_outl_Damage.rds")
+dama1 <- dama1[29,]
+
+## Managemente
+mana <- readRDS("result_test2_rm_outl_Management.rds")
+mana<- mana %>% filter(Model==18)
+
+mana1 <- readRDS("params_test2_rm_outl_Management.rds")
+mana1<- mana1[18,]
+
+###########################################################################################################
+############################        Estimation of projected costs        ##################################
+###########################################################################################################
+
+pred.list <- c("Pop_size", "Agriculture","suitability") #Damage
+pred.list <- c("GDP","suitability") #Management
+pred.list
+
+do_df_extrap <- function(df.sp, df.fit){
+  df.sp$comb2 <-  paste(df.sp$Species, df.sp$Type_of_cost_merged)
+  df.sp$comb <- paste(df.sp$Official_country, df.sp$Species, df.sp$Type_of_cost_merged)
+  df.fit$comb <- paste(df.fit$Official_country, df.fit$Species, df.fit$Type_of_cost_merged)
+  
+  same <- which(df.sp$comb %in% df.fit$comb)
+  df.extrap <- df.sp[-same,]
+  
+  df.fit$type <- "invacost"
+  df.extrap$type <- "extrapol"
+  
+  df.extrap$Cost_estimate_per_year_2017_USD_exchange_rate <- NA
+  df.extrap$cost_mil <- NA
+  df.extrap$Cost_ID <- paste("extrap", "_", 1:nrow(df.extrap), sep="")
+  
+  missing_cols <- setdiff(names(df.fit), names(df.extrap))
+  for(col in missing_cols) {
+    df.extrap[[col]] <- NA  # Add missing columns as NA
+  }
+  
+  df.extrap <- df.extrap[names(df.fit)]
+  return(df.extrap)
+}
+
+
+i <- "Damage"
+eu.df1<-  eu.df[eu.df$Type_of_cost_merged==i,]
+df.fit.full2 <- df.fit.full[df.fit.full$Type_of_cost_merged == i,]
+ratio.fit <- get_ratio(df.fit.full2, pred.list= pred.list) #obtain all the ratios
+
+
+
+
+df.extrap <- do_df_extrap(df.sp= dfsp, df.fit= eu.df1) #this contains ONLY the extrapolation data, no invacost data
+eu.df2 <- eu.df1[,-c(6,7,2,14)]
+eu.df2$type <- "invacost"
+
+df.extrap <- df.extrap[, names(eu.df2)]
+#matched_names <- intersect(names(eu.df2), names(df.extrap))
+#df.extrap <- df.extrap[, matched_names]
+
+df.extrap<- df.extrap %>% filter(Type_of_cost_merged==i)
+
+df.extrap$GDP <- as.numeric(df.extrap$GDP)
+df.extrap$Pop_size <- as.numeric(df.extrap$Pop_size)
+df.extrap$Agriculture <- as.numeric(df.extrap$Agriculture)
+
+df.full.extrap <- rbind(eu.df2, df.extrap) 
+
+df.full.extrap$Agriculture <- as.numeric(df.full.extrap$Agriculture)
+df.full.extrap$GDP <- as.numeric(df.full.extrap$GDP)
+df.full.extrap$Pop_size <- as.numeric(df.full.extrap$Pop_size)
+
+gamma1 <- c(Pop_size = 0.423887955  , Agriculture = 0.369839798, suitability = 0.009770164) #Damage
+gamma1 <- c(GDP = 0.5926255, suitability = 0.1537433) #Management
+gamma1
+
+absent <- setdiff(unique(df.full.extrap$comb2[df.full.extrap$type == "invacost"]), unique(df.full.extrap$comb2[df.full.extrap$type == "extrapol"])) #those are in the invacost dataset but NOT in the extrapol
+absent2 <- setdiff(unique(df.full.extrap$comb2[df.full.extrap$type == "extrapol"]), unique(df.full.extrap$comb2[df.full.extrap$type == "invacost"]))
+df.full.extrap <- df.full.extrap[!(df.full.extrap$comb2 %in% absent),]
+df.full.extrap <- df.full.extrap[!(df.full.extrap$comb2 %in% absent2),]
+
+
+df.full.extrap = as.data.frame(df.full.extrap)
+
+df.full.extrap$cost_mil <- df.full.extrap$Cost_estimate_per_year_2017_USD_exchange_rate  
+df.full.extrap$cost_mil <- df.full.extrap$cost_bil * 1000  
+
+
+b0 <- dama1["b0"]
+b1 <- dama1["time"]
+b2 <- dama1["time2"]
+gamma1 <- dama
+df<- df.full.extrap
+if(! ("time2" %in% pred.list)) {
+    	b2=b1 }
+  
+calculate_suitability <- function(S_ij, t2, b0, b1, b2) {
+  # Incluir un umbral temporal
+  t3 <- t2 - b2
+  t3[t3 < 0] <- 0
+  
+  # Calcular la idoneidad con el tiempo ajustado 't3'
+  S_a <- S_ij / (1 + exp(-(b0 + b1 * t3)))
+  return(S_a)
+}
+
+
+df$suitability2 <- mapply(calculate_suitability, 
+                          df$suitability, 
+                          df$t2, 
+                          MoreArgs = list(b0 = b0, b1 = b1, b2 = b2))
+
+for (Z in 1:nrow(df)) {
+  if (is.na(df$t2[Z])) {
+    df$suitability2[Z] <- df$suitability[Z]
+  } }
+  
+  dff <- df
+scale_fun <- function(dff){
+  
+  ln <- pred.list
+  
+  if ("time" %in% ln) {
+    ln <- ln[ln != "time"]
+  }
+  
+  pos <- which(dff$type == "invacost")
+  x <- dff[pos,] #invacost data
+  y <- dff[-pos,] #extrapolation data
+  
+  
+  v <- list() #v will contains the ratios
+  for(i in 1:nrow(y)){
+    if(is.null(ln)){
+      pred1 <- x$cost_mil
+      y$cost_pred[i] <- mean(pred1)
+    } else {
+      
+      for(j in 1:length(ln)) {
+        # Convert y[i, ln[j]] to numeric if it's a character
+        y_numeric <- y[i, ln[j]]
+        
+        if(is.character(y_numeric)) {
+          y_numeric <- as.numeric(y_numeric)
+        }
+        
+        # Make sure x[, ln[j]] is a numeric vector
+        x_numeric <- as.numeric(x[, ln[j]])
+        
+        # Compute the ratio and bound it
+        v[[j]] <- bound_ratio(y_numeric / x_numeric, 
+                              min.r = min(ratio.fit[, paste("min", pred.list[j], sep = "_")]), 
+                              max.r = max(ratio.fit[, paste("max", pred.list[j], sep = "_")]))
+      }
+      
+      vm <- matrix(unlist(v), ncol=length(ln)) #create a matrix where each column is a predictor (so that we can multiply across rows)
+      colnames(vm) <- ln
+      #Filter
+      #gamma1_filtered <- gamma1[ln]
+      gamma1_filtered <- dama1[ln]
+      
+      #prod.vm <-apply(vm, MARGIN= 1, function(x){ prod(x^gamma1_filtered[-length(gamma1_filtered)])}) #multiply each row and apply the gamma1 exp
+      prod.vm <- apply(vm, MARGIN= 1, function(x){ prod(x^gamma1_filtered) }) #multiply each row and apply the gamma1 exp.
+      
+      
+      pred1 <- x$cost_mil * prod.vm
+      y$cost_pred[i] <- mean(pred1)
+      
+    }
+  }
+  return(y) #Here we want to keep the entire dataframe to compare/analyse the results
+}
+
+df.by <- by(df, df$comb2, scale_fun)
+df.full <- do.call(rbind, df.by) 
+
+return(df.full)
+}
+
+      
+write_xlsx(df.full, paste0("Interpolation_costs", "_", i, ".xlsx"))   
+      
+      
+      
+      
+      
+      
+      
+  
+scale_fit_fun1 <- function(gamma1, df, pred.list, extrap = F, fit.test =F){ #gamma1= vector of parameters to optimize
+  
+  full_gamma[names(gamma1)]=gamma1
+  
+  ######### NEW #########
+  # Extract parameters
+  b0 <- full_gamma["b0"]
+  b1 <- full_gamma["time"]
+  b2=full_gamma["time2"] 
+  
+  t3=df$t2 - b2 #include a temporal threshold
+  t3[t3<0]=0
+  
+  #NEEDED FOR THRESHOLD MODEL
+  #  if(! ("time2" %in% pred.list))
+  #  {
+  #  	b2=b1
+  #  }else{
+  #	  
+  #	  if(b2 < b1)
+  #	  	return(NA)
+  #  }
+  #  if(b0<0 || b0 >1)
+  #  {	
+  #  	return(NA)
+  #  }
+  ######### NEW #########
+  #  if(b1 != 0)	
+  if("time" %in% pred.list) {
+    
+    ln <- pred.list
+    
+    #logistic version
+    for (Z in 1:nrow(df)) {
+      # Si t2 es NA, asignar suitability directamente
+      if (is.na(df$t2[Z])) {
+        df$suitability2[Z] <- df$suitability[Z]
+      }
+      # Si t2 es "0", asignar suitability directamente
+      else if (df$t2[Z] == "0") {
+        df$suitability2[Z] <- df$suitability[Z]
+      }
+      # Aplicar la fórmula de logistic growth si t2 no es NA y no es "0"
+      else {
+        df$suitability2[Z] <- df$suitability[Z] / (1 + exp(-(b0 + b1 * t3[Z])))
+      }
+    }
+    
+    
+    #	  if(! ("time2"  %in% pred.list))	  
+    #	  {
+    #	  	pos=which(t3>0)
+    #	  	df$suitability2[pos]=df$suitability[pos]
+    #	  }
+    
+    
+    
+    #threshold segmented version 
+    #	df$suitability2=df$suitability
+    #	pos=which(!is.na(df$t2) & df$t2 < b1)
+    #	df$suitability2[pos]=df$suitability[pos]*b0
+    #	pos=which(!is.na(df$t2) & df$t2 >= b1 & df$t2 <b2)
+    #	slope=(1-b0)/(b2-b1) #rise/run
+    #	if(length(pos)>0)
+    #		df$suitability2[pos] = (b0+slope*t3[pos])*df$suitability[pos]
+    
+    
+    #}else{
+    #  df$suitability2=df$suitability
+    #}  
+  
+  
+  scale_fun <- function(dff, fit.test){
+    pos <- which(dff$type == "invacost")
+    x <- dff[pos,] #invacost data
+    y <- dff[-pos,] #extrapolation data
+    if(nrow(y) == 1){
+      y$cost_pred <- NA 
+      if(fit.test ==T){ #return the full dataset to calculate metrics of fit
+        return(y)
+      } else {
+        return(NA)
+      }  
+      
+    } else {
+      
+      for(i in 1:nrow(y)){
+        
+        ######### NEW #########
+        # For y dataset
+        
+        pred1 <- x$Cost_estimate_per_year_2017_USD_exchange_rate[-i] * (y$GDP[i] / x$GDP[-i])^full_gamma["GDP"] * 
+          (y$Pop_size[i] / x$Pop_size[-i])^full_gamma["Pop_size"] * 
+          (y$Agriculture[i] / x$Agriculture[-i])^full_gamma["Agriculture"] * 
+          (y$suitability2[i]  / x$suitability2[-i])^full_gamma["suitability"]
+        y$cost_pred[i] <- mean(pred1)
+      }
+      
+      if(fit.test ==T){
+        return(y)
+        
+      } else {
+        ll <- log(dnorm(y$Cost_estimate_per_year_2017_USD_exchange_rate - y$cost_pred, sd= full_gamma["sd"]))
+        #	print(dff$comb2[1])
+        #	print(head(ll))
+        #          ll <- sum(log(dnorm(y$cost_mil - y$cost_pred, sd= full_gamma["sd"])))
+        return(-sum(ll)) 
+      }
+      
+    }
+  }
+  df.by <- by(df, df$comb2, scale_fun, fit.test= fit.test) #apply the function "scale_fun" to each "comb2" column. comb2 is the combination of species/sector/type of cost
+  
+  
+  
+  if(fit.test == T){
+    df.full <- do.call(rbind, df.by) 
+    #df.full<- rbind(df.by)
+    cat('*')
+    return(df.full)
+    
+  } else {
+    measure.fit <- sum(df.by, na.rm = T) #sum of the log-likelihood
+    #	print(measure.fit)
+    return(measure.fit)
+  }
+  
+}
+
+
+df <- df.full.extrap
+scale_fit_fun1 <- function(gamma1, df, pred.list, extrap = F, fit.test =F){ #gamma1= vector of parameters to optimize
+  if(extrap == F){
+    
+    full_gamma[names(gamma1)]=gamma1
+    
+    ######### NEW #########
+    # Extract parameters
+    b0 <- model["b0"]
+    b1 <- model["time"]
+    ######### NEW #########
+    if(b1 != 0)	
+    {
+      df$suitability2=df$suitability/ (1 + exp(-(b0 + b1 * df$t2)))
+      pos=which(is.na(df$t2))
+      df$suitability2[pos]=df$suitability[pos]
+    }else{
+      df$suitability2=df$suitability
+    }  
+    
+    ln <- pred.list #replace pred.list by ln (list.name) so that we don't overwrite it
+    
+    if(length(gamma1) == 1){
+      names(gamma1) <- "sd"
+    }
+    
+    scale_fun <- function(dff, fit.test){
+      pos <- which(dff$type == "invacost")
+      x <- dff[pos,] #invacost data
+      y <- dff[-pos,] #extrapolation data
+      if(nrow(y) == 1){
+        y$cost_pred <- NA 
+        if(fit.test ==T){ #return the full dataset to calculate metrics of fit
+          return(y)
+        } else {
+          return(NA)
+        }  
+        
+      } else {
+        
+        for(i in 1:nrow(y)){
+          
+          ######### NEW #########
+          # For y dataset
+          
+          pred1 <- x$Cost_estimate_per_year_2017_USD_exchange_rate[-i] * (y$GDP[i] / x$GDP[-i])^full_gamma["GDP"] * 
+            (y$Pop_size[i] / x$Pop_size[-i])^full_gamma["Pop_size"] * 
+            (y$Agriculture[i] / x$Agriculture[-i])^full_gamma["Agriculture"] * 
+            (y$suitability2[i]  / x$suitability2[-i])^full_gamma["suitability"]
+          y$cost_pred[i] <- mean(pred1)
+        }
+        
+        if(fit.test ==T){
+          return(y)
+          
+        } else {
+          ll <- log(dnorm(y$Cost_estimate_per_year_2017_USD_exchange_rate - y$cost_pred, sd= full_gamma["sd"]))
+          #	print(dff$comb2[1])
+          #	print(head(ll))
+          #          ll <- sum(log(dnorm(y$cost_mil - y$cost_pred, sd= full_gamma["sd"])))
+          return(-sum(ll)) 
+        }
+        
+      }
+    }
+    df.by <- by(df, df$comb2, scale_fun, fit.test= fit.test) #apply the function "scale_fun" to each "comb2" column. comb2 is the combination of species/sector/type of cost
+    
+    
+    
+    if(fit.test == T){
+      df.full <- do.call(rbind, df.by) 
+      #df.full<- rbind(df.by)
+      cat('*')
+      return(df.full)
+      
+    } else {
+      measure.fit <- sum(df.by, na.rm = T) #sum of the log-likelihood
+      #	print(measure.fit)
+      return(measure.fit)
+    }
+    
+  } else { 
+    
+    ######### NEW #########
+    # Extract parameters
+    b0 <- gamma1["b0"]
+    b1 <- gamma1["time"]
+    b2=gamma1["time2"]   	
+    t3=df$t2 - b2 #include a temporal threshold
+    t3[t3<0]=0
+    ######### NEW ##########
+    # if(b1 != 0)	{
+    #     df$suitability2=df$suitability/ (1 + exp(-(b0 + b1 * df$t2)))
+    #     pos=which(is.na(df$t2))
+    #    df$suitability2[pos]=df$suitability[pos]
+    #  }else{
+    #   df$suitability2=df$suitability
+    # }   
+    
+    scale_fun <- function(dff){
+      
+      ln <- pred.list
+      
+      if ("time" %in% ln) {
+        ln <- ln[ln != "time"]
+      }
+      
+      pos <- which(dff$type == "invacost")
+      x <- dff[pos,] #invacost data
+      y <- dff[-pos,] #extrapolation data
+      
+      
+      v <- list() #v will contains the ratios
+      for(i in 1:nrow(y)){
+        if(is.null(ln)){
+          pred1 <- x$cost_mil
+          y$cost_pred[i] <- mean(pred1)
+        } else {
+          
+          
+          for(j in 1:length(ln)) {
+            # Convert y[i, ln[j]] to numeric if it's a character
+            y_numeric <- y[i, ln[j]]
+            
+            if(is.character(y_numeric)) {
+              y_numeric <- as.numeric(y_numeric)
+            }
+            
+            # Make sure x[, ln[j]] is a numeric vector
+            x_numeric <- as.numeric(x[, ln[j]])
+            
+            # Compute the ratio and bound it
+            v[[j]] <- bound_ratio(y_numeric / x_numeric, 
+                                  min.r = min(ratio.fit[, paste("min", pred.list[j], sep = "_")]), 
+                                  max.r = max(ratio.fit[, paste("max", pred.list[j], sep = "_")]))
+          }
+          
+          vm <- matrix(unlist(v), ncol=length(ln)) #create a matrix where each column is a predictor (so that we can multiply across rows)
+          colnames(vm) <- ln
+          #Filter
+          gamma1_filtered <- gamma1[ln]
+          
+          
+          #prod.vm <-apply(vm, MARGIN= 1, function(x){ prod(x^gamma1_filtered[-length(gamma1_filtered)])}) #multiply each row and apply the gamma1 exp
+          prod.vm <- apply(vm, MARGIN= 1, function(x){ prod(x^gamma1_filtered) }) #multiply each row and apply the gamma1 exp.
+          
+          
+          pred1 <- x$cost_mil * prod.vm
+          y$cost_pred[i] <- mean(pred1)
+          
+        }
+      }
+      
+      return(y) #Here we want to keep the entire dataframe to compare/analyse the results
+    }
+    
+    df.by <- by(df, df$comb2, scale_fun)
+    df.full <- do.call(rbind, df.by) 
+    
+    return(df.full)
+  }
+}
+
+
+extrap <- scale_fit_fun1(gamma1 = gamma1, df.full.extrap, pred.list=pred.list, extrap = T, fit.test= F)
+
+
+write_xlsx(extrap, paste0("Interpolation_costs", "_", i, ".xlsx"))
+
+
+
+# Prev code from Brian
+
+
+get_ratio <- function(dff, pred.list){
+  
+  ln <- pred.list 
+  if ("time" %in% ln) {
+    ln <- ln[ln != "time"]
+  }
+  
+  pos <- which(dff$type == "invacost")
+  x <- dff[pos,] 
+  y <- dff[-pos,] 
+  
+  mxr = matrix(NA, nrow = nrow(y), ncol = length(ln) * 2)
+  
+  for(i in 1:nrow(y)){
+    if(is.null(ln)){
+      return(mxr)
+    } else {
+      for(j in 1:length(ln)){
+        mxr[i, j] <- min(y[i, ln[j]] / x[, ln[j]])
+        mxr[i, j + length(ln)] <- max(y[i, ln[j]] / x[, ln[j]])
+      }
+    }
+  }
+  
+  mxr2 <- as.data.frame(mxr)
+  
+  
+  new_col_names <- c(paste(rep("min", length(ln)), ln, sep = "_"), 
+                     paste(rep("max", length(ln)), ln, sep = "_"))
+  
+
+  colnames(mxr2) <- new_col_names
+  return(mxr2)
+}
+
+
+
+rm_outlier=T
+
+if(rm_outlier==T) {
+	nm_outlier="rm_outl_"
+} else{
+	nm_outlier=""
+}
+
+#Load datasets: 
+setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Brian code")
+eu.df <- read.csv("eu.df2.csv")
+eu.df <- read_xlsx("eu.df2.xlsx")
+
+eu.df$t2=eu.df$Impacted_year-eu.df$t
+eu.df$t2[eu.df$t2<0]=0
+eu.df$Cost_estimate_per_year_2017_USD_exchange_rate=exp(eu.df$Cost_estimate_per_year_2017_USD_exchange_rate)/1000000
+if(rm_outlier==T){
+	eu.df=eu.df[ eu.df$Cost_estimate_per_year_2017_USD_exchange_rate<5000,]
+	}
+##Give all the combinations of predictors (in order to tell scale_fit_fun what it should run)
+pos.pred <- c("GDP", "Pop_size", "Agriculture", "suitability","time")
+
+pred.l <- list(m1= c(pos.pred[1]), m2= c(pos.pred[2]), m3= c(pos.pred[3]), m4= c(pos.pred[4]), m5= pos.pred[c(1,2)], m6= pos.pred[c(1,4)], 
+m7= pos.pred[c(1,3)],m8= pos.pred[c(4,2)], m9= pos.pred[c(4,3)], m10= pos.pred[c(2,3)], m11= pos.pred[c(1,3,4)], m12= pos.pred[c(1,2,3)], m13= pos.pred[c(1,2,4)],
+               m14= pos.pred[c(2,3,4)], m15= pos.pred[1:4]) #create all combinations of predictors
+
+tm_list=which(unlist(lapply(pred.l,function(x){return("suitability" %in% x)}))) #try suitability both with and without time
+
+for(i in tm_list){
+	pred.l[[paste0(i,"t")]]=c(pred.l[[i]],"time")
+}
+
+
+full_gamma <-c(0,0,0,0,0,NA,10) #named "full" gamma vector to make the optimization function (scale_fit_fun) faster
+names(full_gamma)=c(pos.pred, "sd","b0")
+full_gamma2=full_gamma
+full_gamma2[] <-NA
+
+
+cost.types = unique(eu.df$Type_of_cost_merged)
+v.AIC.costtypes <- numeric(length(cost.types))
+names(v.AIC.costtypes) = cost.types
+
+results_df <- data.frame()
+
+#Likelihood function modified to include b0 and b1 (changes are noted by: ######### NEW #########, at the beginning and end)
+scale_fit_fun <- function(gamma1, df, pred.list, extrap = F, fit.test =F){ #gamma1= vector of parameters to optimize
+  
+  full_gamma[names(gamma1)]=gamma1
+
+  ######### NEW #########
+  # Extract parameters
+  b0 <- full_gamma["b0"]
+  b1 <- full_gamma["time"]
+  ######### NEW #########
+  if(b1 != 0)	
+  {
+	  df$suitability2=df$suitability/ (1 + exp(-(b0 + b1 * df$t2)))
+	  pos=which(is.na(df$t2))
+	  df$suitability2[pos]=df$suitability[pos]
+  }else{
+	  df$suitability2=df$suitability
+  }  
+
+  ln <- pred.list #replace pred.list by ln (list.name) so that we don't overwrite it
+  
+    if(length(gamma1) == 1){
+      names(gamma1) <- "sd"
+    }
+   
+    scale_fun <- function(dff, fit.test){
+      pos <- which(dff$type == "invacost")
+      x <- dff[pos,] #invacost data
+      y <- dff[-pos,] #extrapolation data
+      if(nrow(y) == 1){
+        y$cost_pred <- NA 
+        if(fit.test ==T){ #return the full dataset to calculate metrics of fit
+          return(y)
+        } else {
+		return(NA)
+	}  
+	
+      } else {
+        
+        for(i in 1:nrow(y)){
+          
+          ######### NEW #########
+          # For y dataset
+          
+          pred1 <- x$Cost_estimate_per_year_2017_USD_exchange_rate[-i] * (y$GDP[i] / x$GDP[-i])^full_gamma["GDP"] * 
+            (y$Pop_size[i] / x$Pop_size[-i])^full_gamma["Pop_size"] * 
+            (y$Agriculture[i] / x$Agriculture[-i])^full_gamma["Agriculture"] * 
+            (y$suitability2[i]  / x$suitability2[-i])^full_gamma["suitability"]
+          y$cost_pred[i] <- mean(pred1)
+      }
+        
+        if(fit.test ==T){
+          return(y)
+          
+        } else {
+          ll <- log(dnorm(y$Cost_estimate_per_year_2017_USD_exchange_rate - y$cost_pred, sd= full_gamma["sd"]))
+#	print(dff$comb2[1])
+#	print(head(ll))
+#          ll <- sum(log(dnorm(y$cost_mil - y$cost_pred, sd= full_gamma["sd"])))
+          return(-sum(ll)) 
+        }
+        
+    }
+   }
+    df.by <- by(df, df$comb2, scale_fun, fit.test= fit.test) #apply the function "scale_fun" to each "comb2" column. comb2 is the combination of species/sector/type of cost
+    
+    
+    
+    if(fit.test == T){
+      df.full <- do.call(rbind, df.by) 
+      #df.full<- rbind(df.by)
+      cat('*')
+      return(df.full)
+      
+    } else {
+      measure.fit <- sum(df.by, na.rm = T) #sum of the log-likelihood
+#	print(measure.fit)
+      return(measure.fit)
+    }
+    
+}
+
+
+#This code include the information for b0 and b1 
+names(eu.df)
+names(dfsp)
+
+do_df_extrap <- function(df.sp, df.fit){
+  #Keep only species/sector/type of cost that are NOT present in the invacost database
+  df.sp$comb2 <-  paste(df.sp$Species, df.sp$Type_of_cost_merged)
+  df.sp$comb <- paste(df.sp$Official_country, df.sp$Species,  df.sp$Type_of_cost_merged)
+  df.fit$comb <- paste(df.fit$Official_country, df.fit$Species, df.fit$Type_of_cost_merged)
+  
+  
+  same <- which(df.sp$comb %in% df.fit$comb)
+  df.extrap <- df.sp[-same,] #remove all rows of data that are present in df
+  
+  
+  df.fit$type <- "invacost" #to keep track of waht is what
+  df.extrap$type <- "extrapol" #to keep track of what is what
+  
+  df.extrap$Cost_estimate_per_year_2017_USD_exchange_rate <- NA
+  df.extrap$cost_mil <- NA
+  df.extrap$Cost_ID <- paste("extrap", "_", 1:nrow(df.extrap), sep="")
+  
+  common_cols <- intersect(names(df.fit), names(df.extrap))
+  
+  
+  #reorder columns to use rbind
+  df.extrap <- df.extrap[common_cols]
+  #df.extrap <- df.extrap[names(df.fit)]
+  
+  ##We want to keep only the extrapolation part of the dataframe, because the "invacost" df will be the bootstrap
+  return(df.extrap)
+} 
+
+df.extrap <- do_df_extrap(df.sp= dfsp, df.fit= eu.df) #this contains ONLY the extrapolation data, no invacost data
+
+
+  
+setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Brian code/Results_Ismael")
+#This code include the information for b0 and b1 
+df.fit1 <- eu.df
+eu.df$type <- "invacost"
+df.fit1$type <- "extrapol"
+df.fit.full <- rbind(eu.df, df.fit1)
+
+df.fit.full <- as.data.frame(df.fit.full)
+for (i in cost.types) {
+
+lst<-list()
+params<-list()
+   for(m in 1:length(pred.l)){ #loop over each model
+  
+  
+    eu.df1<-  eu.df[eu.df$Type_of_cost_merged==i,]
+    df.fit.full2 <- df.fit.full[df.fit.full$Type_of_cost_merged == i,]
+    
+    pred.list <- unlist(pred.l[[m]]) #to obtain the correct predictors
+    # Add b0 and b1 to the initial parameters  NEW (!!!!!!!!!!!)
+    if("time" %in% pred.list)  {
+    	par1 <- c(rep(0, length(pred.list)), sd(eu.df1$Cost_estimate_per_year_2017_USD_exchange_rate, na.rm=T), b0 = 10) ######### NEW ######### (bo and b1)
+	    names(par1) <- c(pred.list, "sd", "b0")   ######### NEW ######### (bo and b1)
+    }else{
+    	par1 <- c(rep(0, length(pred.list)), sd(eu.df1$Cost_estimate_per_year_2017_USD_exchange_rate, na.rm=T)) ######### NEW ######### (bo and b1)
+	    names(par1) <- c(pred.list, "sd")   ######### NEW ######### (bo and b1)
+    }
+        
+    #choose the best of the previous parameter - using the one with the most similar variables, and the best likelihood
+	len=length(pred.list)
+    if(len>1)  {
+    	mlk= sapply(1:(m-1),function(m1){
+		#take only the simpler models where all terms will be subset of more complex model 
+		x=pred.l[[m1]]
+	    	if(length(which(x %in% pred.list))==length(x)) 	{
+	    		return(lst[[m1]]$Likelihood)
+	    		
+	    	}else{
+			return(NA)    	
+		}
+    	})
+    	tmpp=params[[which.min(mlk)]]
+    	par1[names(tmpp)]=tmpp
+    }
+    
+    
+	mem_val=0; mem_val2=0
+      while(mem_val==0 | mem_val > mem_val2+.1){ #is it the first one, or did we find an improvement last time? 
+      	op.gamma <- optim(par1, scale_fit_fun, df= df.fit.full2, pred.list= pred.list, extrap= F, fit.test=F) ##optimisation function
+      gamma1 <- op.gamma$par #extract gamma1
+	mem_val=mem_val2
+	mem_val2=op.gamma$value
+	par1=gamma1
+	print(mem_val2)
+#	print(gamma1)
+      }
+      params[[m]]=op.gamma$par
+#    }
+	
+    
+    names(gamma1) <- names(par1) #c(pred.list, "sd", "b0", "b1") ######### NEW ######### (bo and b1)
+#    gamma1
+    ######### NEW #########
+    #print(paste("Convergence code:", op.gamma$convergence))
+    ######### NEW #########
+    
+    
+    ##Metrics of fit --> calculate AIC for the given set of parameters gamma
+    
+    # log-likelihood:
+    fit.t1 <- scale_fit_fun(gamma1 = gamma1, df.fit.full2, pred.list= pred.list, extrap = F, fit.test=T) 
+
+    fit.t11 <- scale_fit_fun(gamma1 = gamma1, df.fit.full2, pred.list= pred.list, extrap = F, fit.test=F) 
+    likelihoods <- fit.t11
+    v.AIC=2*likelihoods + 2 * length(gamma1)  
+    
+    
+   
+    
+    ###########################################################################################################
+    ############################        Estimation of projected costs        ##################################
+    ###########################################################################################################
+    
+    pred.list <- c("Pop_size", "Agriculture","suitability") #Damage
+    pred.list <- c("GDP","suitability") #Management
+    pred.list
+    
+    i <- "Damage"
+    eu.df1<-  eu.df[eu.df$Type_of_cost_merged==i,]
+    df.fit.full2 <- df.fit.full[df.fit.full$Type_of_cost_merged == i,]
+    ratio.fit <- get_ratio(df.fit.full2, pred.list= pred.list) #obtain all the ratios
+    
+    
+    df.extrap <- do_df_extrap(df.sp= dfsp, df.fit= eu.df1) #this contains ONLY the extrapolation data, no invacost data
+    eu.df2 <- eu.df1[,-c(5,10,15,16)]
+    df.extrap <- df.extrap[, names(eu.df2)]
+    
+    
+    
+    df.extrap<- df.extrap %>% filter(Type_of_cost_merged==i)
+    
+    df.full.extrap <- rbind(eu.df2, df.extrap) 
+    
+    df.full.extrap$Agriculture <- as.numeric(df.full.extrap$Agriculture)
+    df.full.extrap$GDP <- as.numeric(df.full.extrap$GDP)
+    df.full.extrap$Pop_size <- as.numeric(df.full.extrap$Pop_size)
+    
+    gamma1 <- c(Pop_size = 0.4695528  , Agriculture = 0.1886563, suitability = 0.2208422) #Damage
+    gamma1 <- c(GDP = 0.5926253, suitability = 0.1536059) #Management
+    gamma1
+    
+    absent <- setdiff(unique(df.full.extrap$comb2[df.full.extrap$type == "invacost"]), unique(df.full.extrap$comb2[df.full.extrap$type == "extrapol"])) #those are in the invacost dataset but NOT in the extrapol
+    absent2 <- setdiff(unique(df.full.extrap$comb2[df.full.extrap$type == "extrapol"]), unique(df.full.extrap$comb2[df.full.extrap$type == "invacost"]))
+    df.full.extrap <- df.full.extrap[!(df.full.extrap$comb2 %in% absent),]
+    df.full.extrap <- df.full.extrap[!(df.full.extrap$comb2 %in% absent2),]
+    
+    
+    df.full.extrap = as.data.frame(df.full.extrap)
+    
+    df.full.extrap$cost_mil <- df.full.extrap$Cost_estimate_per_year_2017_USD_exchange_rate  
+    
+    data <- readRDS("params_Management.rds")
+    data1 <- readRDS("result_rm_outl_Management.rds")
+    model <- data[22,] #Damage
+    model <- data[17,] #Management
+    
+    b0 <- model["b0"]
+    b1 <- model["time"]
+    
+    scale_fit_fun1 <- function(gamma1, df, pred.list, extrap = F, fit.test =F){ #gamma1= vector of parameters to optimize
+      if(extrap == F){
+        
+          full_gamma[names(gamma1)]=gamma1
+          
+          ######### NEW #########
+          # Extract parameters
+          b0 <- model["b0"]
+          b1 <- model["time"]
+          ######### NEW #########
+          if(b1 != 0)	
+          {
+            df$suitability2=df$suitability/ (1 + exp(-(b0 + b1 * df$t2)))
+            pos=which(is.na(df$t2))
+            df$suitability2[pos]=df$suitability[pos]
+          }else{
+            df$suitability2=df$suitability
+          }  
+          
+          ln <- pred.list #replace pred.list by ln (list.name) so that we don't overwrite it
+          
+          if(length(gamma1) == 1){
+            names(gamma1) <- "sd"
+          }
+          
+          scale_fun <- function(dff, fit.test){
+            pos <- which(dff$type == "invacost")
+            x <- dff[pos,] #invacost data
+            y <- dff[-pos,] #extrapolation data
+            if(nrow(y) == 1){
+              y$cost_pred <- NA 
+              if(fit.test ==T){ #return the full dataset to calculate metrics of fit
+                return(y)
+              } else {
+                return(NA)
+              }  
+              
+            } else {
+              
+              for(i in 1:nrow(y)){
+                
+                ######### NEW #########
+                # For y dataset
+                
+                pred1 <- x$Cost_estimate_per_year_2017_USD_exchange_rate[-i] * (y$GDP[i] / x$GDP[-i])^full_gamma["GDP"] * 
+                  (y$Pop_size[i] / x$Pop_size[-i])^full_gamma["Pop_size"] * 
+                  (y$Agriculture[i] / x$Agriculture[-i])^full_gamma["Agriculture"] * 
+                  (y$suitability2[i]  / x$suitability2[-i])^full_gamma["suitability"]
+                y$cost_pred[i] <- mean(pred1)
+              }
+              
+              if(fit.test ==T){
+                return(y)
+                
+              } else {
+                ll <- log(dnorm(y$Cost_estimate_per_year_2017_USD_exchange_rate - y$cost_pred, sd= full_gamma["sd"]))
+                #	print(dff$comb2[1])
+                #	print(head(ll))
+                #          ll <- sum(log(dnorm(y$cost_mil - y$cost_pred, sd= full_gamma["sd"])))
+                return(-sum(ll)) 
+              }
+              
+            }
+          }
+          df.by <- by(df, df$comb2, scale_fun, fit.test= fit.test) #apply the function "scale_fun" to each "comb2" column. comb2 is the combination of species/sector/type of cost
+          
+          
+          
+          if(fit.test == T){
+            df.full <- do.call(rbind, df.by) 
+            #df.full<- rbind(df.by)
+            cat('*')
+            return(df.full)
+            
+          } else {
+            measure.fit <- sum(df.by, na.rm = T) #sum of the log-likelihood
+            #	print(measure.fit)
+            return(measure.fit)
+          }
+          
+        } else { 
+          
+          ######### NEW #########
+          # Extract parameters
+          b0 <- model["b0"]
+          b1 <- model["time"]
+          ######### NEW ##########
+          # if(b1 != 0)	{
+          #     df$suitability2=df$suitability/ (1 + exp(-(b0 + b1 * df$t2)))
+          #     pos=which(is.na(df$t2))
+          #    df$suitability2[pos]=df$suitability[pos]
+        #  }else{
+            #   df$suitability2=df$suitability
+         # }   
+          
+          scale_fun <- function(dff){
+            
+            ln <- pred.list
+            
+            if ("time" %in% ln) {
+              ln <- ln[ln != "time"]
+            }
+            
+            pos <- which(dff$type == "invacost")
+            x <- dff[pos,] #invacost data
+            y <- dff[-pos,] #extrapolation data
+            
+            
+            v <- list() #v will contains the ratios
+            for(i in 1:nrow(y)){
+              if(is.null(ln)){
+                pred1 <- x$cost_mil
+                y$cost_pred[i] <- mean(pred1)
+              } else {
+                
+                
+                for(j in 1:length(ln)) {
+                  # Convert y[i, ln[j]] to numeric if it's a character
+                  y_numeric <- y[i, ln[j]]
+                  
+                  if(is.character(y_numeric)) {
+                    y_numeric <- as.numeric(y_numeric)
+                  }
+                  
+                  # Make sure x[, ln[j]] is a numeric vector
+                  x_numeric <- as.numeric(x[, ln[j]])
+                  
+                  # Compute the ratio and bound it
+                  v[[j]] <- bound_ratio(y_numeric / x_numeric, 
+                                        min.r = min(ratio.fit[, paste("min", pred.list[j], sep = "_")]), 
+                                        max.r = max(ratio.fit[, paste("max", pred.list[j], sep = "_")]))
+                }
+                
+                vm <- matrix(unlist(v), ncol=length(ln)) #create a matrix where each column is a predictor (so that we can multiply across rows)
+                colnames(vm) <- ln
+                #Filter
+                gamma1_filtered <- gamma1[ln]
+                
+                
+                #prod.vm <-apply(vm, MARGIN= 1, function(x){ prod(x^gamma1_filtered[-length(gamma1_filtered)])}) #multiply each row and apply the gamma1 exp
+       prod.vm <- apply(vm, MARGIN= 1, function(x){ prod(x^gamma1_filtered) }) #multiply each row and apply the gamma1 exp.
+                
+                
+                pred1 <- x$cost_mil * prod.vm
+                y$cost_pred[i] <- mean(pred1)
+                
+              }
+            }
+            
+            return(y) #Here we want to keep the entire dataframe to compare/analyse the results
+          }
+          
+          df.by <- by(df, df$comb2, scale_fun)
+          df.full <- do.call(rbind, df.by) 
+          
+          return(df.full)
+        }
+      }
+        
+    
+    extrap <- scale_fit_fun1(gamma1 = gamma1, df.full.extrap, pred.list=pred.list, extrap = T, fit.test= F)
+    
+
+ write_xlsx(extrap, paste0("Interpolation_costs", "_", i, ".xlsx"))
+
+   
+ # lst[[m]] <- data.frame(
+ #  "AIC" = v.AIC    ,
+ #  "Likelihood" = likelihoods ,
+ #   "Type_cost" = i, 
+ #   "Model" = m                ,
+ #    'predictors' = paste(pred.list, collapse = ";"),
+ #    "Full.Partial_model" = "Partial"
+ #  )
+    cat( pred.list,'Done  ===', "\n")
+    
+    }
+    
+#results_df <- do.call(rbind,lst)
+#saveRDS(results_df,paste0("result_",nm_outlier,i,".rds"))
+#params1=lapply(params, function(x){
+#full_gamma2[names(x)]=x
+#return(full_gamma2)})
+
+#saveRDS(do.call(rbind,params1), paste0("params_",nm_outlier,i,".rds"))
+
+}
+
+
+
+
+names(df.extrap) # solo extrapolation 
+names(eu.df1) # solo invacost
+
+
+if(b1 != 0)	{
+eu.df1$suitability2 <- NA
+
+for(i in 1:nrow(eu.df1)) {
+  if(b1 != 0) {
+    if(is.na(eu.df1$t2[i]) || eu.df1$t2[i] == 0) {
+      eu.df1$suitability2[i] <- eu.df1$suitability[i]
+    } else {
+      eu.df1$suitability2[i] <- eu.df1$suitability[i] / (1 + exp(-(b0 + b1 * eu.df1$t2[i])))
+    }
+  } else {
+    eu.df1$suitability2[i] <- eu.df1$suitability[i]
+  }
+}
+}
+
+
+
+
+
+dff <- df.full.extrap
+  pos <- which(dff$type == "invacost")
+  x <- dff[pos,] #invacost data
+  y <- dff[-pos,] #extrapolation data
+  
+  y$suitability[y$suitability == 0] <- 0.000000000000001554312
+  
+    y$cost_pred <- NA 
+
+    for(i in 1:nrow(y)){
+      pred1 <- x$Cost_estimate_per_year_2017_USD_exchange_rate[-i] *  
+        (y$GDP[i] / x$GDP[-i])^gamma_values["GDP"] * 
+        (y$suitability[i]  / x$suitability[-i])^gamma_values["suitability"]
+      y$cost_pred[i] <- mean(pred1)
+    }
+    
+write_xlsx(y, "Management_interpolate.xlsx")
+write_xlsx(x, "Damage_cost.xlsx")
+    
+    
+    
+pred1 <- x$Cost_estimate_per_year_2017_USD_exchange_rate[-i] *  
+  (y$Pop_size[i] / x$Pop_size[-i])^gamma_values["Pop_size"] * 
+  (y$Agriculture[i] / x$Agriculture[-i])^gamma_values["Agriculture"] * 
+  (y$suitability[i]  / x$suitability[-i])^gamma_values["suitability"]
+y$cost_pred[i] <- mean(pred1)
+
+
+
+min_aic <- min(data$AIC)
+data$DeltaAIC <- data$AIC - min_aic
+
+
+exp_term <- exp(-0.5 * data$DeltaAIC)
+data$Weight <- exp_term / sum(exp_term)
+
+
+
+setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Brian code")
+eu.df <- read_xlsx("eu.df2.xlsx")
+
+eu.df$Cost_estimate_per_year_2017_USD_exchange_rate=exp(eu.df$Cost_estimate_per_year_2017_USD_exchange_rate)/1000000
+
+a<- eu.df %>% group_by(Species, Type_of_cost_merged) %>% summarise(Invacost= sum(Cost_estimate_per_year_2017_USD_exchange_rate))
+
+b<- total %>% group_by(Species, Type_of_cost_merged) %>% summarise(Invacost =sum(cost_pred))
+
+merged_df <- right_join( b,a, by = c("Species", "Type_of_cost_merged"))
+
+
+colnames(merged_df)[colnames(merged_df) == "Invacost.y"] <- "Invacost"
+colnames(merged_df)[colnames(merged_df) == "Invacost.x"] <- "Interpolated"
+
+print(merged_df)
+
