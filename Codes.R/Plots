@@ -4,8 +4,8 @@
 # Ismael Soto
 
 setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Brian code")
-setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Brian code 2.0")
-setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Ismael/")
+setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Brian code 2.0") #damage
+setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Ismael/") #inva 
 
 #load packages
 suppressMessages({
