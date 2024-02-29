@@ -232,3 +232,73 @@ full_database<- full_database %>% separate("Link", c("species", "country"), sep 
 full_database<- full_database %>% filter(!country %in% islands)
 full_database<- full_database %>% filter(species %in% combined_results1$species)
 
+
+### Lets combine the species data with predictors data
+
+file.list <- list.files(pattern='*.xlsx') #171 species
+df.list <- lapply(file.list, read_excel)
+
+df <- do.call(rbind, df.list) #7.8 million records
+
+
+
+# Now our aim here is reduce the redundant information of the predictors. To this lets extract unique cells
+
+occ_points <- sp::SpatialPoints(data.frame(lon = df$decimalLongitude, 
+                                           lat = df$decimalLatitude))
+
+Grid_points <- rasterize(occ_points, grid_count, fun = "count")
+
+cell.ids <- cellFromXY(Grid_points, occ_points)
+cell.ids <- unique(cell.ids) #1.75 million of unique cells
+
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/predictors1.tif"
+predictors <- raster(file_path)
+
+bioclim <- extract(bio_resampled, cell.ids)
+Elevation <- extract(Elevation_resampled, cell.ids)
+Slope <- extract(Slope_resampled, cell.ids)
+Evapotranspiration <- extract(Evapotranspiration_resampled, cell.ids)
+Rugosity <- extract(Rugosity_resampled, cell.ids)
+Roads <- extract(Roads, cell.ids)
+
+
+predictors <- data.frame(cell.id = cell.ids,
+                         bioclim = bioclim,
+                         Elevation = Elevation,
+                         Slope = Slope,
+                         Evapotranspiration = Evapotranspiration,
+                         Rugosity = Rugosity,
+                         Roads = Roads
+                         )
+
+ 
+
+write.csv2(predictors, "ID_predictors.csv")
+write_xlsx(predictors, "ID_predictors.xlsx")
+
+
+# Cool now we need the same but for the species:
+
+spn<- unique(df$species)
+n <- spn[1]
+result_df <- data.frame(species = character(), cell.id = numeric(), stringsAsFactors = FALSE)
+
+for (n in spn) {
+  data <- df[df$species == n, ]
+  data$decimalLongitude <- as.numeric(as.character(data$decimalLongitude))
+  data$decimalLatitude <- as.numeric(as.character(data$decimalLatitude))
+  
+  occ_points <- sp::SpatialPoints(data.frame(lon = data$decimalLongitude, lat = data$decimalLatitude))
+  Grid_points <- rasterize(occ_points, grid_count, fun = "count")
+  cell.ids <- cellFromXY(Grid_points, occ_points)
+  cell.ids <- unique(cell.ids)
+  
+  result_df <- rbind(result_df, data.frame(species = rep(n, length(cell.ids)), cell.id = cell.ids))
+  cat("yatusabes-->", n, ":\n")
+}
+
+unique_species <- unique(result_df$species)
+result_df$species_ID <- match(result_df$species, unique_species)
+result_df<- result_df[,-3]
+write_xlsx(result_df, "Species_ID.xlsx")
