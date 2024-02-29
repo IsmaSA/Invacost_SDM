@@ -1,0 +1,46 @@
+################ Script to place GBIF records in the cells: ------------
+
+gc()
+bio_resampled # as example grid of our predictors
+grid_extent <- extent(-180, 179, -56, 84)  
+
+grid <- raster(grid_extent, res = 0.08333333)
+
+grid_count <- raster(grid)
+
+
+folder_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Species_from_GBIF"  
+
+
+species <- list.files(folder_path, pattern = "\\.xlsx$", full.names = TRUE)
+
+result_df <- data.frame(Species = character(), Ncells = numeric(), stringsAsFactors = FALSE)
+
+for (files in species) { 
+
+  data <- readxl::read_xlsx(files)
+  
+  #data<- data %>% filter(year <2023)
+  
+  occ_points <- sp::SpatialPoints(data.frame(lon = data$decimalLongitude, 
+                                             lat = data$decimalLatitude))
+  
+  grid_count <- rasterize(occ_points, grid_count, fun = "count")
+  
+
+  unique_species <- unique(data$species)
+  
+  freq_table <- freq(grid_count) %>% na.omit() %>% as.data.frame() %>%
+    summarise(Ncells = sum(count))
+  
+  result_df <- result_df %>% 
+    bind_rows(data.frame(Species = unique_species, Ncells = freq_table$Ncells, stringsAsFactors = FALSE))
+  
+cat(files, "==> Done\n")
+
+  }
+
+
+print(result_df)
+
+result_df1<- result_df %>% filter(Ncells < 10)
