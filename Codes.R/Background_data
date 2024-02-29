@@ -1,0 +1,60 @@
+##########################################################################################
+#                                    BACKGROUND DATA
+##########################################################################################
+
+
+
+##Lets read now the file:
+GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_all_density_06-2022.tif"
+GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_amphibians_density_06-2022.tif"
+GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_arthropods_density_06-2022.tif"
+GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_mammals_density_06-2022.tif"
+GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_plants_density_06-2022.tif"
+GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_reptiles_density_06-2022.tif"
+
+bio <- raster::getData('worldclim', var='bio', res=5)
+
+GBIF <- raster(GBIF)
+
+GBIF <- projectRaster(GBIF, bio, method = "bilinear")#adjust the resolution of the GBIF layer
+GBIF
+
+grid_extent <- extent(-180, 179, -56, 84)
+
+bioclim_variable <- bio[[3]]
+water_mask <- bioclim_variable > 0  
+bioclim_variable <- crop(bioclim_variable, grid_extent)
+
+GBIF <- crop(GBIF, grid_extent)
+GBIF <- mask(GBIF, bioclim_variable)
+
+##
+library(raster)
+library(spatstat)
+library(dismo)
+library(ks)
+points <- rasterToPoints(GBIF)
+
+coords <- cbind(points[,1], points[,2])
+
+scale <- length(points[,3]) / sum(points[,3])
+scaled_count  <- points[,3] * scale
+
+coords <- cbind(points[,1], points[,2])
+
+# Do a 2d kernel density estimation.
+target_density <- kde(coords, w=scaled_count)
+
+target_raster <- raster(target_density)
+
+
+# Clip data to the same resolution/extent.
+target_raster <- resample(target_raster, bio, method='bilinear')
+target_raster <- crop(target_raster, grid_extent)
+#target_raster <- target_raster - minValue(target_raster)
+#target_raster <- raster.transformation(target_raster, trans="norm")
+
+#plot(target_raster)
+background_points <- randomPoints(mask =target_raster, n = 10000, prob = TRUE)
+background_points<- background_points %>% as.data.frame()
+
