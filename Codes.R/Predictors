@@ -147,3 +147,88 @@ bioc
 output_file <- "predictors1.tif"
 
 writeRaster(predictors, filename = output_file, format = "GTiff",overwrite=TRUE )
+
+##########################################################################################
+#               COMBINE DATASET WITH MACROSCALARS + time since invasion
+##########################################################################################
+
+elza
+invacost1
+full_database # both datasets
+
+
+agriculture<- read_xls("Agri.xls")
+agriculture <- agriculture[-c(1,2), -c(2:64)]
+agriculture<- agriculture[-1,c(1:2)]
+colnames(agriculture) <- c("country", "agriculture")
+
+#Again... match countries 
+setdiff(full_database$country, agriculture$country) 
+
+full_database$country[full_database$country == "United States of America"] <- "United States"
+full_database$country[full_database$country == "Laos"] <- "Lao PDR"
+full_database$country[full_database$country == "Slovakia"] <- "Slovak Republic"
+full_database$country[full_database$country == "United Republic of Tanzania"] <- "Tanzania"
+full_database$country[full_database$country == "Turkey"] <- "Turkiye"
+full_database$country[full_database$country == "Venezuela"] <- "Venezuela, RB"
+full_database$country[full_database$country == "Iran"] <- "Iran, Islamic Rep."
+full_database$country[full_database$country == "Czech Republic"] <- "Czechia"
+full_database$country[full_database$country == "Democratic Republic of the Congo"] <- "Congo, Dem. Rep."
+full_database$country[full_database$country == "South Korea"] <- "Korea, Rep."
+full_database$country[full_database$country == "Kyrgyzstan"] <- "Kyrgyz Republic"
+full_database$country[full_database$country == "Macedonia"] <- "North Macedonia"
+full_database$country[full_database$country == "Micronesia, Federated States of"] <- "Micronesia, Fed. Sts."
+full_database$country[full_database$country == "Egypt"] <- "Egypt, Arab Rep."
+full_database$country[full_database$country == "Yemen"] <- "Yemen, Rep."
+full_database$country[full_database$country == "Korea, Democratic People's Republic of"] <- "Korea, Dem. People's Rep."
+full_database$country[full_database$country == "Ivory Coast"] <- "Cote d'Ivoire"
+full_database$country[full_database$country == "Brunei"] <- "Brunei Darussalam"
+full_database$country[full_database$country == "East Timor"] <- "Timor-Leste"
+full_database$country[full_database$country == "Russia"] <- "Russian Federation"
+full_database$country[full_database$country == "Republic of Serbia"] <- "Serbia"
+full_database$country[full_database$country == "Gambia"] <- "Gambia, The"
+
+
+full_database<- right_join(full_database, agriculture, by="country")
+colnames(full_database)[4]<- "Agriculture"
+
+
+GDP<- read_xls("GDP.xls")
+GDP <- GDP[-c(1,2), -c(2:64)]
+GDP<- GDP[-1,c(1:2)]
+colnames(GDP) <- c("country", "2020")
+
+setdiff(full_database$country, GDP$country)
+
+
+full_database<- right_join(full_database, GDP, by="country")
+colnames(full_database)[5]<- "GDP"
+
+
+Pop_size<- read_xls("Pop_size.xls")
+Pop_size <- Pop_size[-c(1,2), -c(2:64)]
+Pop_size<- Pop_size[-1,c(1:2)]
+
+colnames(Pop_size) <- c("country", "2020")
+
+setdiff(full_database$country, Pop_size$country)
+
+full_database<- right_join(full_database, Pop_size, by="country")
+colnames(full_database)[6]<- "Pop_size"
+
+#Suitability
+full_database <- full_database %>% unite("Link", c(species,country))
+combined_results<- combined_results %>% unite("Link", c(species,country))
+full_database<- right_join(full_database, combined_results, by="Link")
+
+#Time since invasion
+
+time_since_invasion <- read_xlsx("invacost_first_year.xlsx")
+time_since_invasion<- time_since_invasion[,c(3,4)]
+full_database<- right_join(full_database, time_since_invasion, by="Link")
+
+full_database<- full_database %>% separate("Link", c("species", "country"), sep = "_")
+
+full_database<- full_database %>% filter(!country %in% islands)
+full_database<- full_database %>% filter(species %in% combined_results1$species)
+
