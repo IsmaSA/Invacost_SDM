@@ -1,0 +1,141 @@
+##########################################################################################
+#                                   EXTRACTION  SUITABILITY 
+##########################################################################################
+
+# First we have to combine Invacost data + Elza data
+invacost1<- invacost %>% group_by(Species, Official_country) %>% 
+  summarise(Cost=sum(Cost_estimate_per_year_2017_USD_exchange_rate))
+
+colnames(invacost1)[2] <- "country"
+colnames(invacost1)[1] <- "species"
+
+invacost1<- invacost1 %>% separate("Link", c("species", "country"), sep = "_")
+
+elza <- read_xlsx("Elza_database.xlsx")
+remove_sp<-c("Eichhornia crassipes","Heracleum pubescens","Mustela vison")
+elza <- elza %>% filter(!Taxon %in% remove_sp)
+
+
+elza <- elza[,c(1,2,6)]
+colnames(elza) <- c("species", "country","Cost")
+
+elza$Cost <- as.double(elza$Cost)
+elza$Cost<- 0
+full_database <- rbind(invacost1, elza)
+
+#for the loop
+spn<- unique(full_database$species)
+spn<- setdiff(spn, c("Thaumetopoea processionea","Varroa destructor"))
+n <- spn[1]
+
+combined_results <- data.frame()  
+
+
+### Its important to know that the name of the countries must match (!!) world vs. invacost11 -----
+full_database <- full_database %>% filter(!country =="Diverse/Unspecified")
+full_database <- full_database %>% filter(!country =="Antarctica")
+full_database <- full_database %>% filter(!country =="Holy See")
+full_database <- full_database %>% filter(!country =="Western Sahara")
+full_database <- full_database %>% filter(!country =="Macao")
+full_database <- full_database %>% filter(!country =="Taiwan")
+full_database <- full_database %>% filter(!country =="Sao Tome and Principe")
+full_database <- full_database %>% filter(!country =="Hong Kong")
+
+
+
+# Read the shapefile
+world <- st_read(dsn = "C:/Users/isma-/Downloads/World_Countries_Generalized.shp")
+world <- world[,c(1,4,5)]
+
+setdiff(full_database$country, world$COUNTRYAFF) # Now perfect :)
+
+world$COUNTRYAFF[world$COUNTRYAFF== "United States"] <- "United States of America"
+world$COUNTRYAFF[world$COUNTRYAFF== "Bolivia, Plurinational State of"] <- "Bolivia"
+world$COUNTRYAFF[world$COUNTRYAFF== "Brunei Darussalam"] <- "Brunei"
+world$COUNTRYAFF[world$COUNTRYAFF== "Timor-Leste"] <- "East Timor"
+world$COUNTRYAFF[world$COUNTRYAFF== "Lao People's Democratic Republic"] <- "Laos"
+world$COUNTRYAFF[world$COUNTRYAFF== "Viet Nam"] <- "Vietnam"
+world$COUNTRYAFF[world$COUNTRYAFF== "North Macedonia"] <- "Macedonia"
+world$COUNTRYAFF[world$COUNTRYAFF== "Moldova, Republic of"] <- "Moldova"
+world$COUNTRYAFF[world$COUNTRYAFF== "Serbia"] <- "Republic of Serbia"
+world$COUNTRYAFF[world$COUNTRYAFF== "Russian Federation"] <- "Russia"
+world$COUNTRYAFF[world$COUNTRYAFF== "Turkiye"] <- "Turkey"
+world$COUNTRYAFF[world$COUNTRYAFF== "Tanzania, United Republic of"] <- "United Republic of Tanzania"
+world$COUNTRYAFF[world$COUNTRYAFF== "Côte d'Ivoire"] <- "Ivory Coast"
+world$COUNTRYAFF[world$COUNTRYAFF== "Congo, The Democratic Republic of the"] <- "Democratic Republic of the Congo"
+world$COUNTRYAFF[world$COUNTRYAFF== "Venezuela, Bolivarian Republic of"] <- "Venezuela"
+world$COUNTRYAFF[world$COUNTRYAFF== "Cabo Verde"] <- "Cape Verde"
+world$COUNTRYAFF[world$COUNTRYAFF== "Iran, Islamic Republic of"] <- "Iran"
+world$COUNTRYAFF[world$COUNTRYAFF== "Korea, Republic of"] <- "South Korea"
+world$COUNTRYAFF[world$COUNTRYAFF== "Puerto Rico"] <- "United States of America"
+world$COUNTRYAFF[world$COUNTRYAFF== "Alaska"] <- "United States of America"
+
+#Some special cases (yes - looks redundant, just to be sure :) ) 
+world$COUNTRYAFF[world$COUNTRYAFF== "Czechia"] <- "Czech Republic"
+full_database$country[full_database$country== "Czechia"] <- "Czech Republic"
+full_database$country[full_database$country== "Timor-Leste"] <- "East Timor"
+full_database$country[full_database$country== "Russian Federation"] <- "Russia"
+full_database$country[full_database$country== "Serbia"] <- "Republic of Serbia"
+full_database$country[full_database$country== "Puerto Rico"] <- "United States of America"
+full_database$country[full_database$country== "Brunei Darussalam"] <- "Brunei"
+full_database$country[full_database$country== "Greenland"] <- "Denmark"
+full_database$country[full_database$country== "Côte d'Ivoire"] <- "Ivory Coast"
+
+unique(full_database$country)
+unique(world$COUNTRYAFF)
+
+
+
+### ----------------------------
+combined_results <- data.frame()
+
+
+for (n in spn) {
+  species_data <- full_database[full_database$species == n, ]
+  countries <- unique(species_data$country)
+  
+  raster_file <- paste0("prediction_", n, ".tif")
+  raster_path <- file.path("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/Raster_model", raster_file)
+  
+  if (file.exists(raster_path)) {
+    prediction_raster <- raster(raster_path)
+    raster <- raster(extent(prediction_raster), res = 0.08333)
+    
+    for (country in countries) {
+      species_country <- species_data[species_data$country == country, ]
+      
+      world1 <- world %>% filter(COUNTRYAFF == country)
+      
+      if (nrow(world1) > 0) {
+        world1$COUNTRYAFF <- as.factor(world1$COUNTRYAFF)
+        rasterized <- rasterize(world1, raster, field = "COUNTRYAFF")
+        
+        country_values <- getValues(rasterized)
+        
+        prediction_raster$new_column <- country_values
+        
+        mask <- prediction_raster[[2]] == 1
+        filtered_values <- prediction_raster[[1]][mask]
+        
+        if (length(filtered_values) > 0) {
+          suitability <- data.frame(suitability = sum(filtered_values, na.rm =T))
+          suitability$country <- country
+          suitability$species <- n
+          colnames(suitability)[1] <- "suitability"
+          
+          combined_results <- bind_rows(combined_results, suitability)
+          cat("*")
+        }
+      }
+    }
+  }
+}
+
+#lets remove those small islands... --> should be done before
+unique(combined_results$country)
+
+islands <- c("Antigua and Barbuda","Samoa","Tonga","Barbados","Fiji","Grenada","Saint Kitts and Nevis",
+            "Saint Lucia","Saint Vincent and the Grenadines","Solomon Islands","Vanuatu","Marshall Islands",
+            "Comoros","Palau")
+
+combined_results<- combined_results %>% filter(!country %in% islands)
