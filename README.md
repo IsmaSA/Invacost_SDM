@@ -29,7 +29,7 @@ Biological invasions threaten global biodiversity, human well-being and economie
 
 ### Prerequisites
 
-- R (version 4.0.0 or higher)
+- R (version 4.0.0 or higher) --> I used v4.3.1
 - Required R packages: `dismo`, `rgdal`, `raster`, `rgbif`, `stringr`, `raster`, `sf`,`rgeos`,`invacost`, `tidyr`,`caret`,`pROC`, `tmap`,`mgcv`,`gridExtra`
 
 ## <a href="https://github.com/IsmaSA/Invacost_SDM/tree/main/Codes.R">Codes</a>
