@@ -1,0 +1,242 @@
+
+suppressMessages({
+  library(dplyr, quiet = TRUE, warn.conflicts = FALSE)
+  library(reshape, quiet = TRUE, warn.conflicts = FALSE)
+  library(ggplot2)
+  library(tidyr)  
+  library(stringr)
+  library(invacost)
+  library(biomod2)
+  library(ggplot2)
+  library(rgbif)
+  library(gridExtra)
+  library(raster)
+  library(fasterize)
+  library(sf)
+  library(rasterVis)
+  library(sp)
+  library(mgcv)
+  library(caret)
+  library(pROC)
+  library(xlsx)
+  library(readxl)
+  library(writexl)
+  library(rgdal)
+  library(devtools)
+  Sys.setenv(LANGUAGE = "en")
+})
+
+
+##########################################################################################
+#                                    INVACOST DATA
+##########################################################################################
+{ 
+  setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Brian code")
+  
+  eu.df <- read_xlsx("eu.df2.xlsx")
+  unique(eu.df$Species) # 162
+
+#Get InvaCost
+invacost<- invacost::getInvaCostVersion(version = "4.1")
+invacost = invacost %>% filter(Species %in% unique(eu.df$Species)) # 162
+
+### Cleaning steps
+# Eliminating data with no information on starting and ending years
+invacost <- invacost[-which(is.na(invacost$Probable_starting_year_adjusted)), ]
+invacost <- invacost[-which(is.na(invacost$Probable_ending_year_adjusted)), ]
+
+# Eliminating data with no usable cost value
+invacost <- invacost[-which(is.na(invacost$Cost_estimate_per_year_2017_USD_exchange_rate)), ]
+
+
+#Remove not usseful species records:
+invacost<-invacost[!grepl("/", invacost$Species),]
+invacost<-invacost[!grepl("sp.", invacost$Species),]
+invacost<-invacost[!grepl("spp.", invacost$Species),]
+
+
+unique(invacost$Species) # 811 species
+
+table(invacost$Environment_IAS)
+table(invacost$Kingdom)
+table(invacost$Species) #records per species
+
+unique(invacost$Official_country)
+table(invacost$Geographic_region)
+
+#### Filter out microorganism
+micro <- c("Bacteria","Chromista","Ortharnavirae","Ortharnavirae","Orthornavirae",
+           "Diverse/Unspecified","Viruses","Fungi")
+
+invacost <- invacost %>% filter(!Kingdom %in% micro)
+table(invacost$Kingdom)
+
+unique(invacost$Species) ### 734 
+
+
+##### Remove Marine species
+marine <- c("Amphibalanus improvisus","Magallana gigas","Mnemiopsis leidyi","Prymnesium polylepis",
+            "Prymnesium polylepis","Caulerpa taxifolia","Callinectes sapidus","Undaria pinnatifida",
+            "Limnoperna fortunei","Pterois volitans","Lagocephalus sceleratus","Red tide","Styela clava",
+            "Sargassum muticum","Portunus pelagicus","Ascophyllum nodosum","Didemnum vexillum",
+            "Crepidula porcellana","Rhopilema nomadica","Ciona intestinalis","Codium fragile",
+            "Paralithodes camtschaticus","Carcinus maenas","Pseudochattonella verruculosa",
+            "Teredo navalis","Cercopagis pengoi","Zostera japonica","Sabella spallanzanii",
+            "Elodea canadensis","Mytilopsis sallei", "Eriocheir sinensis")
+
+
+invacost <- invacost %>% filter(!Species %in% marine)
+
+unique(invacost$Species) ### 711 
+
+
+
+###### Apply reliability filters to InvaCost:
+
+invacost<- invacost %>% filter(Implementation=="Observed") %>% filter(Method_reliability =="High")
+
+unique(invacost$Species) ### 553 
+
+
+
+### Country vs site scale 
+
+unique(invacost$Spatial_scale)
+
+scale <- c("Country", "Site")
+
+invacost<- invacost %>% filter(Spatial_scale %in% scale)
+
+Species_scale <- invacost %>% group_by(Species, Spatial_scale) %>% summarise(N_sp = n()) %>% 
+  group_by(Spatial_scale) %>% summarise(N_sp = n()) #204 species vs. 403
+
+invacost<- invacost %>% filter(Spatial_scale =="Country")
+
+unique(invacost$Species) # 204 Species
+
+error_species <- c("Scirtothrips perseae","Bactrocera philippinensis","Culicoides imicola", 
+                   "Teia anartoides","Prostephanus truncatus")  #Not coordinates...
+
+
+invacost<- invacost %>% filter(!Species %in% error_species)
+invacost<- invacost %>% filter(!Species == "Thaumetopoea processionea") #diverse country
+
+species_less_10_grids<-c("Bursaphelenchus mucronatus", "Halotydeus destructor", "Anthonomus grandis", "Rhipicephalus microplus", "Cochliomyia hominivorax", "Phenacoccus solenopsis", "Pectinophora gossypiella", "Liriomyza sativae", "Trogoderma granarium", "Listronotus bonariensis", "Maconellicoccus hirsutus", "Acacia nilotica", "Raoiella indica", "Anopheles darlingi", "Anastrepha fraterculus", "Varroa jacobsoni", "Nilaparvata lugens", "Eupatorium adenophorum", "Rastrococcus invadens", "Aleurodicus rugioperculatus", "Thrips palmi", "Liriomyza huidobrensis", "Paracoccus marginatus", "Gyrodactylus salaris", "Chilo partellus", "Plectranthus parviflorus", "Globodera rostochiensis", "Hypothenemus hampei", "Heracleum sosnowskyi", "Coptotermes gestroi")
+
+invacost<- invacost %>% filter(!Species %in% species_less_10_grids)
+unique(invacost$Species) # 165 Species
+
+invacost<- invacost %>% filter(!Species == "Varroa destructor") #Miss clasified sp (acari)
+unique(invacost$Species) # 162 Specie
+
+unique(invacost$Implementation)
+unique(invacost$Spatial_scale)
+unique(invacost$Type_of_cost_merged)
+invacost = invacost %>% filter(Type_of_cost_merged %in% c("Damage", "Management"))
+
+unique(invacost$Method_reliability)
+unique(invacost$Official_country)
+
+invacost = invacost %>% filter(!Official_country %in% c("Diverse/Unspecified"))
+
+setdiff(invacost$Official_country, eu.df$Official_country)
+setdiff( eu.df$Official_country,invacost$Official_country )
+unique(eu.df$Official_country)
+unique(invacost$Official_country) #93
+
+
+#invacost$Species[invacost$Species == "Pontederia crassipes"] <- "Eichhornia crassipes"
+#invacost$Species[invacost$Species == "Mustela vison"] <- "Neovison vison"
+#invacost$Species[invacost$Species == "Phthorimaea absoluta"] <- "Tuta absoluta"
+
+}
+
+head(invacost)
+
+# Check first record of invasion
+setwd("C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost")
+df = read_xlsx("invacost_first_year.xlsx")
+z = df %>% filter(Species %in% unique(invacost$Species)) # 162
+unique(z$Species)
+
+z_cleaned <- z %>% filter(!FirstRecord== "NA")
+unique(z_cleaned$Species)
+
+
+#### Expand the dataset ####
+expanded <- expandYearlyCosts(invacost, #your help file
+                              startcolumn = "Probable_starting_year_adjusted",
+                              endcolumn = "Probable_ending_year_adjusted")
+min(expanded$Impact_year)
+max(expanded$Impact_year)
+
+expanded<-expanded %>% filter(Impact_year <= "2022")
+expanded<-expanded %>% filter(Impact_year >= "1960")           
+
+expanded$cost <- as.numeric(gsub(",", "", expanded$Cost_estimate_per_year_2017_USD_exchange_rate))
+expanded$cost_bil <- (expanded$cost/1000000000)
+sum(expanded$cost_bil) # 162.72 billion
+nrow(expanded)
+
+unique(expanded$Species) #162
+unique(expanded$Official_country) #93
+
+
+
+a = expanded  %>%  group_by(Type_of_cost_merged) %>% summarise(cost = sum(cost_bil)) %>% 
+                                                      mutate(Percentage = cost / sum(cost) * 100 ) 
+
+a
+
+spn <- unique(invacost$Species)
+spn <- setdiff(spn, done)
+n <- spn[1]
+keys <- tibble(Species = character(), key = integer())
+for (n in spn) {
+    sp <- occ_data(scientificName = n, hasCoordinate = TRUE, occurrenceStatus = "PRESENT",
+                   limit = 5)
+    sp <- sp[["data"]]
+    
+    if (nrow(sp) > 0) {
+      key <- sp$taxonKey[1]
+    } else {
+      key <- NA
+    }
+    
+  keys <- rbind(keys, tibble(Species = n, key = key))
+    cat(n, "Extracted\n")
+  }
+
+unique(keys$Species)
+
+sp <- unique(keys$key)
+s<- sp[1]
+dois <- tibble(Species = character(), DOI = character())
+for(s in sp){
+  x = occ_download(
+    pred_in("basisOfRecord", c("MACHINE_OBSERVATION", "HUMAN_OBSERVATION")),
+    pred_in("taxonKey", s),
+    pred_and(pred_gte("year", 1960), pred_lte("year", 2023)),
+    pred("hasCoordinate", TRUE),
+    pred_lte("coordinateUncertaintyInMeters", 50), 
+    user = "ismaelsoto",
+    pwd = "Ismaputas123.",
+    email = "isma-sa@hotmail.com"
+  )
+  status <- occ_download_meta(x)$status
+  
+  while(status != "SUCCEEDED") {
+    Sys.sleep(15) 
+    status <- occ_download_meta(x)$status
+  }
+  
+  # Once the download is complete, get the DOI
+  z <- occ_download_meta(x)
+  doi2 <- z$doi 
+  dois <- rbind(dois, tibble(Species = s, DOI = doi2))
+  cat(s, "downloaded\n")
+}
+
+
+colnames(dois)[1] = "key"
+p <-dois %>% left_join(keys, by ="key" )  
