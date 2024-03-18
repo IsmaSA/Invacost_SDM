@@ -470,11 +470,61 @@ data_filled <- data_combined %>%
 unique(data_filled$Order)
 
 
-
 # All species: 
 a<- data_filled %>%
   group_by(Order) %>%
   summarise(Cost = sum(billion)) %>% mutate(Percentage = Cost/sum(Cost) * 100 ) # Interpolated
+
+a<- data_filled %>%
+  group_by(Order, Type_of_cost_merged) %>%
+  summarise(Cost = sum(billion),  n =n_distinct(Species)) %>% mutate(Avg = Cost/n)
+
+data_filled<- data_filled[,-c(5)]
+data_filled$cost = data_filled$billion *1000000000
+
+data_filled2<- data_filled %>% group_by(Order,Species,Type_of_cost_merged) %>% summarise(cost=mean(billion)) 
+
+b <- data_filled2 %>%
+  group_by(Order, Type_of_cost_merged) %>%
+  summarise(Average_Cost = mean(cost, na.rm = TRUE)) %>%
+  ungroup()
+
+
+range(data_filled$cost)
+
+world_avg <-
+  data_filled2 %>% group_by(Type_of_cost_merged) %>%
+  summarize(avg = mean(cost, na.rm = TRUE)) %>%
+  pull(avg)
+
+df_sorted <- data_filled2 %>% right_join(b, by=c("Order","Type_of_cost_merged"))
+
+
+df_sorted
+p2<- df_sorted %>% filter(Type_of_cost_merged=="Management") %>% 
+  #mutate(Order = fct_reorder(Order, +Avg)) %>% 
+  #group_by(Species,Order) %>% summarise(billion =sum(billion)) %>% 
+  ggplot(aes(x = Order, y = cost, color = Order))  + #scale_y_continuous(trans = 'log10', breaks = c(0,1,1000,1000000,1000000000)) + 
+   geom_segment(
+    aes(x = Order, xend = Order,
+        y = mean(cost), yend = mean(cost)),
+    size = 0.8
+  ) +
+  geom_hline(aes(yintercept = mean(cost)), color = "gray70", size = 0.7) +
+  geom_jitter(size = 2, alpha = 0.2, width = 0.2) +
+  stat_summary(fun = mean, geom = "point", size = 5) +
+  coord_flip() +
+  labs(
+    x = "", y = "Economic cost" ) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text( size = 12, color="black"),
+    axis.text.y = element_text( size = 12, color="black"),
+    axis.title = element_text( size = 14, color="black"))+
+  scale_color_brewer(palette = "Set2")
+
+p1+p2
 
 
 # Filter for 'Damage' and group by 'Order' and 'type'
