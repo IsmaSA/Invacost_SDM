@@ -1,4 +1,5 @@
 
+
 # PLots For SDMs InvaCost
 
 # Ismael Soto
@@ -49,7 +50,7 @@ management$billion =management$cost_pred/1000
 
 total <- rbind(damage,management) # both costs
 
- 
+
 initial_cost = inva %>%
   filter(Type_of_cost_merged == "Management") %>%
   summarise(total_cost = sum(billion))
@@ -505,7 +506,7 @@ p2<- df_sorted %>% filter(Type_of_cost_merged=="Management") %>%
   #mutate(Order = fct_reorder(Order, +Avg)) %>% 
   #group_by(Species,Order) %>% summarise(billion =sum(billion)) %>% 
   ggplot(aes(x = Order, y = cost, color = Order))  + #scale_y_continuous(trans = 'log10', breaks = c(0,1,1000,1000000,1000000000)) + 
-   geom_segment(
+  geom_segment(
     aes(x = Order, xend = Order,
         y = mean(cost), yend = mean(cost)),
     size = 0.8
@@ -535,7 +536,7 @@ grouped_data_damage <- data_filled %>%
   arrange(-total_cost)
 
 
-p1<-ggplot(grouped_data_damage, aes(x = reorder(Order, -total_cost), y = total_cost, fill = type)) +
+p1<-ggplot(grouped_data_damage, aes(x = reorder(Order, +total_cost), y = total_cost, fill = type)) +
   geom_bar(stat = "identity", position = "stack", color= "black") +
   scale_fill_brewer(palette="Set2", name="Type of cost", labels = c("Interpolated", "InvaCost"))+
   labs(
@@ -544,8 +545,8 @@ p1<-ggplot(grouped_data_damage, aes(x = reorder(Order, -total_cost), y = total_c
     fill = "Type of Cost"
   ) +
   theme_bw() + 
-  theme(axis.text = element_text(size=12), 
-        axis.title = element_text(size=12))
+  theme(axis.text = element_text(size=12, color = "black"), 
+        axis.title = element_text(size=12, color = "black"), legend.position="none" ) + coord_flip()
 
 
 
@@ -556,7 +557,7 @@ grouped_data_management <- data_filled %>%
   arrange(-total_cost)
 
 
-p2<- ggplot(grouped_data_management, aes(x = reorder(Order, -total_cost), y = total_cost, fill = type)) +
+p2<- ggplot(grouped_data_management, aes(x = reorder(Order, +total_cost), y = total_cost, fill = type)) +
   geom_bar(stat = "identity", position = "stack", color= "black") +
   scale_fill_brewer(palette="Set2", name="Type of cost", labels = c("Interpolated", "InvaCost"))+
   labs(
@@ -565,8 +566,8 @@ p2<- ggplot(grouped_data_management, aes(x = reorder(Order, -total_cost), y = to
     fill = "Type of Cost"
   ) +
   theme_bw()+
-  theme(axis.text = element_text(size=12), 
-        axis.title = element_text(size=12))
+  theme(axis.text = element_text(size=12, color = "black"), 
+        axis.title = element_text(size=12, color = "black"),legend.position="none" ) + coord_flip()
 
 p1 + p2
 # facet wrap
@@ -665,84 +666,84 @@ for (h in unique(data1$Type_of_cost_merged)) {
   for (n in spn) {
     df1 <- data2[data2$Species == n, ]
     countries <- unique(df1$Official_country)
-  
-  raster_file <- paste0("prediction_", n, ".tif")
-raster_path <- file.path("C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost/New_results/Raster_model", raster_file)
-  
-  if (file.exists(raster_path)) {
-    prediction_raster <- raster(raster_path)
-    raster <- raster(extent(prediction_raster), res = 0.08333)
     
-    for (country in countries) {
-      species_country <- df1[df1$Official_country == country, ]
+    raster_file <- paste0("prediction_", n, ".tif")
+    raster_path <- file.path("C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost/New_results/Raster_model", raster_file)
+    
+    if (file.exists(raster_path)) {
+      prediction_raster <- raster(raster_path)
+      raster <- raster(extent(prediction_raster), res = 0.08333)
       
-      world1 <- world %>% filter(COUNTRYAFF == country)
-      
-      if (nrow(world1) > 0) {
-        world1$COUNTRYAFF <- as.factor(world1$COUNTRYAFF)
-        world1 <- world1 %>%
-          mutate(COUNTRYAFF_NUM = as.numeric(as.factor(COUNTRYAFF)))
+      for (country in countries) {
+        species_country <- df1[df1$Official_country == country, ]
         
-        #I want to obtain the mean latitude: 
-        mean_latitudes <- lapply(world1$geometry, function(polygon) {
-          # Extract all coordinates for the polygon
-          coords <- st_coordinates(polygon)
+        world1 <- world %>% filter(COUNTRYAFF == country)
+        
+        if (nrow(world1) > 0) {
+          world1$COUNTRYAFF <- as.factor(world1$COUNTRYAFF)
+          world1 <- world1 %>%
+            mutate(COUNTRYAFF_NUM = as.numeric(as.factor(COUNTRYAFF)))
           
-          # Extract the latitude values (second column of the coords matrix)
-          latitudes <- coords[,2]
+          #I want to obtain the mean latitude: 
+          mean_latitudes <- lapply(world1$geometry, function(polygon) {
+            # Extract all coordinates for the polygon
+            coords <- st_coordinates(polygon)
+            
+            # Extract the latitude values (second column of the coords matrix)
+            latitudes <- coords[,2]
+            
+            # Calculate and return the mean latitude
+            mean(latitudes)
+          })
           
-          # Calculate and return the mean latitude
-          mean(latitudes)
-        })
-        
-        # Convert the list to a vector and add it to the dataframe
-        
-        lat <- unlist(mean_latitudes)
-        lat <- mean(lat)
-        lat_rad <- numeric(length(lat))
-        lat_rad <- ifelse(lat < 0, lat * (pi/180) * -1, lat * (pi/180))
-        
-        Area_cell <- 111.1 * 111.3 * cos(lat_rad)  
-        
-        
-        
-        rasterized <- rasterize(world1, raster, field = "COUNTRYAFF_NUM")
-        
-        country_values <- getValues(rasterized)
-        
-        prediction_raster$new_column <- country_values
-        
-        mask <- prediction_raster[[2]] == 1
-        filtered_values <- prediction_raster[[1]][mask]
-        
-        if (length(filtered_values) > 0) {
-          suitability <- filtered_values %>% as.data.frame()
+          # Convert the list to a vector and add it to the dataframe
           
-          A_prime_ci <- sum(suitability$., na.rm=TRUE) 
+          lat <- unlist(mean_latitudes)
+          lat <- mean(lat)
+          lat_rad <- numeric(length(lat))
+          lat_rad <- ifelse(lat < 0, lat * (pi/180) * -1, lat * (pi/180))
+          
+          Area_cell <- 111.1 * 111.3 * cos(lat_rad)  
           
           
-          # Conversion to km²
-          #Area_cell <- 9.259 ^ 2  # Aproxx to my res 0.0833
-          suitable_area_cell = as.numeric(A_prime_ci) * Area_cell
           
-          Cost_km2 <- species_country$Cost / suitable_area_cell
+          rasterized <- rasterize(world1, raster, field = "COUNTRYAFF_NUM")
           
-          Cost_per_km2 <- data.frame(Cost = Cost_km2)
+          country_values <- getValues(rasterized)
           
-          Cost_per_km2$country <- country
-          Cost_per_km2$species <- n
-          Cost_per_km2$Type_of_cost <- h  
-          Cost_per_km2$A_prime_ci <- A_prime_ci
-          Cost_per_km2$suitable_area_cell <- suitable_area_cell
+          prediction_raster$new_column <- country_values
           
+          mask <- prediction_raster[[2]] == 1
+          filtered_values <- prediction_raster[[1]][mask]
           
-          Cost_km2_total <- rbind(Cost_km2_total, Cost_per_km2)
+          if (length(filtered_values) > 0) {
+            suitability <- filtered_values %>% as.data.frame()
+            
+            A_prime_ci <- sum(suitability$., na.rm=TRUE) 
+            
+            
+            # Conversion to km²
+            #Area_cell <- 9.259 ^ 2  # Aproxx to my res 0.0833
+            suitable_area_cell = as.numeric(A_prime_ci) * Area_cell
+            
+            Cost_km2 <- species_country$Cost / suitable_area_cell
+            
+            Cost_per_km2 <- data.frame(Cost = Cost_km2)
+            
+            Cost_per_km2$country <- country
+            Cost_per_km2$species <- n
+            Cost_per_km2$Type_of_cost <- h  
+            Cost_per_km2$A_prime_ci <- A_prime_ci
+            Cost_per_km2$suitable_area_cell <- suitable_area_cell
+            
+            
+            Cost_km2_total <- rbind(Cost_km2_total, Cost_per_km2)
+          }
+          cat("*")
         }
-        cat("*")
       }
     }
   }
-}
 } # in billion
 
 
@@ -891,9 +892,9 @@ p1<-ggplot(data = data1, aes(x = species, y = Cost_transformed)) + coord_flip()+
   scale_fill_brewer(palette="Set2", name="Type of cost", labels = c("Damage", "Management")) +
   theme_bw() +
   theme( legend.position = "none",
-    axis.text.x = element_text(size = 12, color= "black"), 
-    axis.text.y = element_text(size = 12, face = "italic", color= "black"), 
-    axis.title.x = element_text(size = 14, face = "bold", color= "black")
+         axis.text.x = element_text(size = 12, color= "black"), 
+         axis.text.y = element_text(size = 12, face = "italic", color= "black"), 
+         axis.title.x = element_text(size = 14, face = "bold", color= "black")
   ) +
   labs(y = expression(paste("Economic cost per km"^"2")), x = NULL) + # Make "2" superscript
   annotation_logticks(sides = "b", short = unit(1,"mm"),
@@ -925,9 +926,9 @@ p2 <- ggplot(data = data2, aes(x = reorder(country, +Cost_transformed), y = Cost
   scale_fill_manual(values = custom_colors) +  
   theme_bw() +
   theme( legend.position = "none",
-    axis.text.x = element_text(size = 12,  color= "black"), 
-    axis.text.y = element_text(size = 12,  color= "black"),
-    axis.title.x = element_text(size = 14, face = "bold",  color= "black")
+         axis.text.x = element_text(size = 12,  color= "black"), 
+         axis.text.y = element_text(size = 12,  color= "black"),
+         axis.title.x = element_text(size = 14, face = "bold",  color= "black")
   ) +
   labs(y = expression(paste("Economic cost per km"^"2")), x = NULL) +
   annotation_logticks(sides = "b", short = unit(1, "mm"),
@@ -1066,7 +1067,7 @@ summary_data3_sf <- merge(world_continents, summary_data3, by = "Continent")
 breaks <- c(0, 1500, 3000, 4500, 10500,  90000)
 
 tm_shape(summary_data3_sf,
-             projection = "+proj=eck4") +
+         projection = "+proj=eck4") +
   tm_polygons("Cost_transformed",
               palette = "OrRd",
               title = "Cost per km2",
@@ -1164,7 +1165,7 @@ base_url <- "https://hatscripts.github.io/circle-flags/flags/"
 for (code in country_codes) {
   flag_url <- paste0(base_url, code, ".svg")
   destfile <- paste0(code, "_flag.svg")
-    tryCatch({
+  tryCatch({
     download.file(flag_url, destfile = destfile, mode = "wb")
     message("Downloaded flag for country code: ", code)
   }, error = function(e) {
@@ -1261,14 +1262,14 @@ world_map_moll$cost_bil_cat <- cut(world_map_moll$cost_bil, breaks = breaks, inc
 
 # Create the plot
 plot1 <- mapCountryData(world_map_moll, 
-                       nameColumnToPlot = "cost_bil_cat",
-                       catMethod = "categorical",
-                       colourPalette = palette_colors_alpha_5,
-                       missingCountryCol = "white",
-                       mapRegion = "world",
-                       borderCol = "black", 
-                       lwd = 0.5, 
-                       addLegend = F)
+                        nameColumnToPlot = "cost_bil_cat",
+                        catMethod = "categorical",
+                        colourPalette = palette_colors_alpha_5,
+                        missingCountryCol = "white",
+                        mapRegion = "world",
+                        borderCol = "black", 
+                        lwd = 0.5, 
+                        addLegend = F)
 
 labels <- sprintf("%d%% - %d%%", head(breaks, -1), tail(breaks, -1))
 labels <- c(labels, sprintf(">%d%%", tail(breaks, -1)[length(breaks) - 1]))
@@ -1354,7 +1355,7 @@ world_map <- getMap()
 quantile_breaks <- quantile(world_map$cost_bil, probs=seq(0, 1, by=0.15), na.rm=TRUE)
 plots <- list()
 for(t in type){
-
+  
   inva_country_sum <- all[all$Type_of_cost_merged ==t, ] %>% filter(type=="Invacost") %>% 
     group_by(Official_country) %>%
     summarise(total_cost_inva = sum(billion))
@@ -1478,7 +1479,7 @@ for(t in type){
   merged_country_sum <- merged_country_sum %>%
     mutate(percentage_increase = ((total_cost_inva - total_cost_damage) / total_cost_damage) * 100)
   
-
+  
   matches <- match(world_map$SOVEREIGNT, merged_country_sum$Official_country)
   world_map$cost_bil <- ifelse(is.na(matches), NA, merged_country_sum$percentage_increase[matches])  
   #quantile_breaks <- quantile(world_map$cost_bil, probs=seq(0, 1, by=0.15), na.rm=TRUE)
@@ -1556,130 +1557,130 @@ sum(all$billion) # 528.8137
 ###### InvaCost:
 all1 <- all %>% filter(type=="Invacost")
 
-  world_map <- getMap()
-  
-  summary_data <- aggregate(billion ~ Official_country, all1, sum)
-  
-  range(summary_data$billion) # 
-  
-  summary_data$Official_country[summary_data$Official_country== 'Viet Nam'] = 'Vietnam'
-  summary_data$Official_country[summary_data$Official_country== 'Czechia'] = 'Czech Republic'
-  summary_data$Official_country[summary_data$Official_country== 'Brunei Darussalam'] = 'Brunei'
-  summary_data$Official_country[summary_data$Official_country== 'Syrian Arab Republic'] = 'Syria'
-  #summary_data$Official_country[summary_data$Official_country== 'Greenland'] = 'Vietnam'
-  summary_data$Official_country[summary_data$Official_country== 'Guinea-Bissau'] = 'Guinea Bissau'
-  summary_data$Official_country[summary_data$Official_country== 'Iran, Islamic Republic of'] = 'Iran'
-  summary_data$Official_country[summary_data$Official_country== 'Korea, Republic of'] = 'South Korea'
-  summary_data$Official_country[summary_data$Official_country== 'Micronesia, Federated States of'] = 'Federated States of Micronesia'
-  summary_data$Official_country[summary_data$Official_country== 'Russian Federation'] = 'Russia'
-  summary_data$Official_country[summary_data$Official_country== 'Serbia'] = 'Republic of Serbia'
-  summary_data$Official_country[summary_data$Official_country== 'Syrian Arab Republic'] = 'Syrian Arab Republic'
-  summary_data$Official_country[summary_data$Official_country== 'Tanzania, United Republic of'] = 'United Republic of Tanzania'
-  summary_data$Official_country[summary_data$Official_country== 'Timor-Leste'] = 'East Timor'
-  summary_data$Official_country[summary_data$Official_country== 'United Kingdom of Great Britain and Northern Ireland'] = 'United Kingdom'
-  
-  
-  summary_data$Official_country[summary_data$Official_country== 'Cape verde'] = 'Cape Verde'
-  summary_data$Official_country[summary_data$Official_country== 'Vietnam'] = 'Viet Nam'
-  summary_data$Official_country[summary_data$Official_country== 'United Kingdom'] = 'United Kingdom of Great Britain and Northern Ireland'
-  summary_data$Official_country[summary_data$Official_country== 'Iran, Islamic Republic of'] = 'Iran'
-  summary_data$Official_country[summary_data$Official_country== 'Russia'] = 'Russian Federation'
-  
-  summary_data <- aggregate(billion ~ Official_country, summary_data, sum)
-  
-  {
-    continent <- data.frame(
-      Official_country = c(
-        "Netherlands", "New Zealand", "Nicaragua", "Niger", "Nigeria", "North Korea", "North Macedonia", "Norway", "Oman",
-        "Pakistan", "Palestine", "Panama", "Papua New Guinea", "Paraguay", "Peru", "Philippines", "Poland", "Portugal",
-        "Qatar", "Republic of the Congo", "Romania", "Russia", "Rwanda", "Saint Kitts and Nevis", "Saint Lucia", "Saint Vincent and the Grenadines",
-        "Samoa", "San Marino", "Saudi Arabia", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "Singapore", "Slovakia",
-        "Slovenia", "Solomon Islands", "Somalia", "South Africa", "South Korea", "South Sudan", "Spain", "Sri Lanka", "Sudan",
-        "Suriname", "Sweden", "Switzerland", "Syria", "Taiwan", "Tajikistan", "Tanzania", "Thailand", "Togo", "Tonga",
-        "Trinidad and Tobago", "Tunisia", "Turkey", "Turkmenistan", "Tuvalu", "Uganda", "Ukraine", "United Arab Emirates",
-        "United Kingdom", "United States of America", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela",
-        "Vietnam", "Yemen", "Zambia", "Zimbabwe"
-      ),
-      Continent = c(
-        "Europe", "Oceania", "North America", "Africa", "Africa", "Asia", "Europe", "Europe", "Asia",
-        "Asia", "Asia", "North America", "Oceania", "South America", "South America", "Asia", "Europe", "Europe",
-        "Asia", "Africa", "Europe", "Europe/Asia", "Africa", "North America", "North America", "North America",
-        "Oceania", "Europe", "Asia", "Africa", "Europe", "Africa", "Africa", "Asia", "Europe",
-        "Europe", "Oceania", "Africa", "Africa", "Asia", "Africa", "Europe", "Asia", "Africa",
-        "South America", "Europe", "Europe", "Asia", "Asia", "Asia", "Africa", "Asia", "Africa", "Oceania",
-        "North America", "Africa", "Europe/Asia", "Asia", "Oceania", "Africa", "Europe", "Asia",
-        "Europe", "North America", "South America", "Asia", "Oceania", "Europe", "South America",
-        "Asia", "Asia", "Africa", "Africa"
-      )
-    )
-    additional_countries <- data.frame(
-      Official_country = c(
-        "Malaysia", "Mali", "Malta", "Mauritania", "Mauritius", "Mexico",
-        "Micronesia, Federated States of", "Moldova", "Mongolia", "Montenegro",
-        "Morocco", "Mozambique", "Myanmar", "Namibia", "Nepal", "Republic of Serbia",
-        "Russian Federation", "Syrian Arab Republic", "Tanzania, United Republic of",
-        "Timor-Leste", "United Kingdom of Great Britain and Northern Ireland",
-        "United Republic of Tanzania", "Viet Nam"
-      ),
-      Continent = c(
-        "Asia", "Africa", "Europe", "Africa", "Africa", "North America",
-        "Oceania", "Europe", "Asia", "Europe",
-        "Africa", "Africa", "Asia", "Africa", "Asia", "Europe",
-        "Europe/Asia", "Asia", "Africa",
-        "Asia", "Europe",
-        "Africa", "Asia"
-      )
-    )
-    countries_continents <- data.frame(
-      Official_country = c(
-        "Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Argentina", "Armenia", "Australia", "Austria",
-        "Azerbaijan", "Bahrain", "Bangladesh", "Belarus", "Belgium", "Belize", "Benin", "Bhutan", "Bolivia",
-        "Bosnia and Herzegovina", "Botswana", "Brazil", "Brunei", "Brunei Darussalam", "Bulgaria", "Burkina Faso",
-        "Burundi", "Cambodia", "Cameroon", "Canada", "Cape Verde", "Central African Republic", "Chad", "Chile",
-        "China", "Colombia", "Costa Rica", "Croatia", "Cuba", "Cyprus", "Czech Republic", "Czechia", "Democratic Republic of the Congo",
-        "Denmark", "Djibouti", "Dominica", "Dominican Republic", "East Timor", "Ecuador", "Egypt", "El Salvador",
-        "Equatorial Guinea", "Estonia", "Eswatini", "Ethiopia", "Fiji", "Finland", "France", "Gabon", "Gambia",
-        "Georgia", "Germany", "Ghana", "Greece", "Greenland", "Guatemala", "Guinea", "Guinea-Bissau", "Guyana",
-        "Haiti", "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq"
-        # ... Add more countries as needed
-      ),
-      Continent = c(
-        "Asia", "Europe", "Africa", "Europe", "Africa", "South America", "Asia", "Oceania", "Europe",
-        "Asia", "Asia", "Asia", "Europe", "Europe", "North America", "Africa", "Asia", "South America",
-        "Europe", "Africa", "South America", "Asia", "Asia", "Europe", "Africa",
-        "Africa", "Asia", "Africa", "North America", "Africa", "Africa", "Africa", "South America",
-        "Asia", "South America", "North America", "Europe", "North America", "Asia", "Europe", "Europe", "Africa",
-        "Europe", "Africa", "North America", "North America", "Asia", "South America", "Africa", "North America",
-        "Africa", "Europe", "Africa", "Africa", "Oceania", "Europe", "Europe", "Africa", "Africa",
-        "Asia", "Europe", "Africa", "Europe", "North America", "North America", "Africa", "Africa", "South America",
-        "North America", "North America", "Europe", "Europe", "Asia", "Asia", "Asia", "Asia"
-        # ... Add continents for more countries as needed
-      )
-    )
-    additional_countries2 <- data.frame(
-      Official_country = c(
-        "Iran", "Ireland", "Israel", "Italy", "Ivory Coast", "Jamaica", "Japan",
-        "Jordan", "Kazakhstan", "Kenya", "Kiribati", "Korea, Republic of", "Kuwait", "Kyrgyzstan",
-        "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia", "Libya", "Liechtenstein", "Lithuania",
-        "Luxembourg", "Macedonia", "Madagascar", "Malawi"
-      ),
-      Continent = c(
-        "Asia", "Europe", "Asia", "Europe", "Africa", "North America", "Asia",
-        "Asia", "Asia", "Africa", "Oceania", "Asia", "Asia", "Asia",
-        "Asia", "Europe", "Asia", "Africa", "Africa", "Africa", "Europe", "Europe",
-        "Europe", "Europe", "Africa", "Africa"
-      )
-    )
-    continent_classification <- rbind(continent, additional_countries,additional_countries2, countries_continents)
-  }
-  summary_data2<- left_join(summary_data, continent_classification, by ="Official_country")
-  unique(summary_data2$Continent)
-  
-  fix(summary_data2) # change two 
+world_map <- getMap()
 
-  summary_data3 <- aggregate(billion ~ Continent, summary_data2, sum)
-  sum(summary_data3$billion)
-  
+summary_data <- aggregate(billion ~ Official_country, all1, sum)
+
+range(summary_data$billion) # 
+
+summary_data$Official_country[summary_data$Official_country== 'Viet Nam'] = 'Vietnam'
+summary_data$Official_country[summary_data$Official_country== 'Czechia'] = 'Czech Republic'
+summary_data$Official_country[summary_data$Official_country== 'Brunei Darussalam'] = 'Brunei'
+summary_data$Official_country[summary_data$Official_country== 'Syrian Arab Republic'] = 'Syria'
+#summary_data$Official_country[summary_data$Official_country== 'Greenland'] = 'Vietnam'
+summary_data$Official_country[summary_data$Official_country== 'Guinea-Bissau'] = 'Guinea Bissau'
+summary_data$Official_country[summary_data$Official_country== 'Iran, Islamic Republic of'] = 'Iran'
+summary_data$Official_country[summary_data$Official_country== 'Korea, Republic of'] = 'South Korea'
+summary_data$Official_country[summary_data$Official_country== 'Micronesia, Federated States of'] = 'Federated States of Micronesia'
+summary_data$Official_country[summary_data$Official_country== 'Russian Federation'] = 'Russia'
+summary_data$Official_country[summary_data$Official_country== 'Serbia'] = 'Republic of Serbia'
+summary_data$Official_country[summary_data$Official_country== 'Syrian Arab Republic'] = 'Syrian Arab Republic'
+summary_data$Official_country[summary_data$Official_country== 'Tanzania, United Republic of'] = 'United Republic of Tanzania'
+summary_data$Official_country[summary_data$Official_country== 'Timor-Leste'] = 'East Timor'
+summary_data$Official_country[summary_data$Official_country== 'United Kingdom of Great Britain and Northern Ireland'] = 'United Kingdom'
+
+
+summary_data$Official_country[summary_data$Official_country== 'Cape verde'] = 'Cape Verde'
+summary_data$Official_country[summary_data$Official_country== 'Vietnam'] = 'Viet Nam'
+summary_data$Official_country[summary_data$Official_country== 'United Kingdom'] = 'United Kingdom of Great Britain and Northern Ireland'
+summary_data$Official_country[summary_data$Official_country== 'Iran, Islamic Republic of'] = 'Iran'
+summary_data$Official_country[summary_data$Official_country== 'Russia'] = 'Russian Federation'
+
+summary_data <- aggregate(billion ~ Official_country, summary_data, sum)
+
+{
+  continent <- data.frame(
+    Official_country = c(
+      "Netherlands", "New Zealand", "Nicaragua", "Niger", "Nigeria", "North Korea", "North Macedonia", "Norway", "Oman",
+      "Pakistan", "Palestine", "Panama", "Papua New Guinea", "Paraguay", "Peru", "Philippines", "Poland", "Portugal",
+      "Qatar", "Republic of the Congo", "Romania", "Russia", "Rwanda", "Saint Kitts and Nevis", "Saint Lucia", "Saint Vincent and the Grenadines",
+      "Samoa", "San Marino", "Saudi Arabia", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "Singapore", "Slovakia",
+      "Slovenia", "Solomon Islands", "Somalia", "South Africa", "South Korea", "South Sudan", "Spain", "Sri Lanka", "Sudan",
+      "Suriname", "Sweden", "Switzerland", "Syria", "Taiwan", "Tajikistan", "Tanzania", "Thailand", "Togo", "Tonga",
+      "Trinidad and Tobago", "Tunisia", "Turkey", "Turkmenistan", "Tuvalu", "Uganda", "Ukraine", "United Arab Emirates",
+      "United Kingdom", "United States of America", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela",
+      "Vietnam", "Yemen", "Zambia", "Zimbabwe"
+    ),
+    Continent = c(
+      "Europe", "Oceania", "North America", "Africa", "Africa", "Asia", "Europe", "Europe", "Asia",
+      "Asia", "Asia", "North America", "Oceania", "South America", "South America", "Asia", "Europe", "Europe",
+      "Asia", "Africa", "Europe", "Europe/Asia", "Africa", "North America", "North America", "North America",
+      "Oceania", "Europe", "Asia", "Africa", "Europe", "Africa", "Africa", "Asia", "Europe",
+      "Europe", "Oceania", "Africa", "Africa", "Asia", "Africa", "Europe", "Asia", "Africa",
+      "South America", "Europe", "Europe", "Asia", "Asia", "Asia", "Africa", "Asia", "Africa", "Oceania",
+      "North America", "Africa", "Europe/Asia", "Asia", "Oceania", "Africa", "Europe", "Asia",
+      "Europe", "North America", "South America", "Asia", "Oceania", "Europe", "South America",
+      "Asia", "Asia", "Africa", "Africa"
+    )
+  )
+  additional_countries <- data.frame(
+    Official_country = c(
+      "Malaysia", "Mali", "Malta", "Mauritania", "Mauritius", "Mexico",
+      "Micronesia, Federated States of", "Moldova", "Mongolia", "Montenegro",
+      "Morocco", "Mozambique", "Myanmar", "Namibia", "Nepal", "Republic of Serbia",
+      "Russian Federation", "Syrian Arab Republic", "Tanzania, United Republic of",
+      "Timor-Leste", "United Kingdom of Great Britain and Northern Ireland",
+      "United Republic of Tanzania", "Viet Nam"
+    ),
+    Continent = c(
+      "Asia", "Africa", "Europe", "Africa", "Africa", "North America",
+      "Oceania", "Europe", "Asia", "Europe",
+      "Africa", "Africa", "Asia", "Africa", "Asia", "Europe",
+      "Europe/Asia", "Asia", "Africa",
+      "Asia", "Europe",
+      "Africa", "Asia"
+    )
+  )
+  countries_continents <- data.frame(
+    Official_country = c(
+      "Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Argentina", "Armenia", "Australia", "Austria",
+      "Azerbaijan", "Bahrain", "Bangladesh", "Belarus", "Belgium", "Belize", "Benin", "Bhutan", "Bolivia",
+      "Bosnia and Herzegovina", "Botswana", "Brazil", "Brunei", "Brunei Darussalam", "Bulgaria", "Burkina Faso",
+      "Burundi", "Cambodia", "Cameroon", "Canada", "Cape Verde", "Central African Republic", "Chad", "Chile",
+      "China", "Colombia", "Costa Rica", "Croatia", "Cuba", "Cyprus", "Czech Republic", "Czechia", "Democratic Republic of the Congo",
+      "Denmark", "Djibouti", "Dominica", "Dominican Republic", "East Timor", "Ecuador", "Egypt", "El Salvador",
+      "Equatorial Guinea", "Estonia", "Eswatini", "Ethiopia", "Fiji", "Finland", "France", "Gabon", "Gambia",
+      "Georgia", "Germany", "Ghana", "Greece", "Greenland", "Guatemala", "Guinea", "Guinea-Bissau", "Guyana",
+      "Haiti", "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq"
+      # ... Add more countries as needed
+    ),
+    Continent = c(
+      "Asia", "Europe", "Africa", "Europe", "Africa", "South America", "Asia", "Oceania", "Europe",
+      "Asia", "Asia", "Asia", "Europe", "Europe", "North America", "Africa", "Asia", "South America",
+      "Europe", "Africa", "South America", "Asia", "Asia", "Europe", "Africa",
+      "Africa", "Asia", "Africa", "North America", "Africa", "Africa", "Africa", "South America",
+      "Asia", "South America", "North America", "Europe", "North America", "Asia", "Europe", "Europe", "Africa",
+      "Europe", "Africa", "North America", "North America", "Asia", "South America", "Africa", "North America",
+      "Africa", "Europe", "Africa", "Africa", "Oceania", "Europe", "Europe", "Africa", "Africa",
+      "Asia", "Europe", "Africa", "Europe", "North America", "North America", "Africa", "Africa", "South America",
+      "North America", "North America", "Europe", "Europe", "Asia", "Asia", "Asia", "Asia"
+      # ... Add continents for more countries as needed
+    )
+  )
+  additional_countries2 <- data.frame(
+    Official_country = c(
+      "Iran", "Ireland", "Israel", "Italy", "Ivory Coast", "Jamaica", "Japan",
+      "Jordan", "Kazakhstan", "Kenya", "Kiribati", "Korea, Republic of", "Kuwait", "Kyrgyzstan",
+      "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia", "Libya", "Liechtenstein", "Lithuania",
+      "Luxembourg", "Macedonia", "Madagascar", "Malawi"
+    ),
+    Continent = c(
+      "Asia", "Europe", "Asia", "Europe", "Africa", "North America", "Asia",
+      "Asia", "Asia", "Africa", "Oceania", "Asia", "Asia", "Asia",
+      "Asia", "Europe", "Asia", "Africa", "Africa", "Africa", "Europe", "Europe",
+      "Europe", "Europe", "Africa", "Africa"
+    )
+  )
+  continent_classification <- rbind(continent, additional_countries,additional_countries2, countries_continents)
+}
+summary_data2<- left_join(summary_data, continent_classification, by ="Official_country")
+unique(summary_data2$Continent)
+
+fix(summary_data2) # change two 
+
+summary_data3 <- aggregate(billion ~ Continent, summary_data2, sum)
+sum(summary_data3$billion)
+
 
 
 world_continents <- aggregate(world["pop_est"], by = list(Continent = world$continent), FUN = sum)
@@ -1694,8 +1695,8 @@ p1<-tm_shape(summary_data3_sf,
               palette = "OrRd",
               breaks = breaks,
               title = "Cost in US$ billion",
-             # style="pretty"
-             )+
+              # style="pretty"
+  )+
   tm_layout(
     legend.bg.color = "white",
     inner.margins=c(.04, .01, .1, .01),
@@ -1752,89 +1753,89 @@ summary_data$Official_country[summary_data$Official_country== 'Russia'] = 'Russi
 summary_data <- aggregate(billion ~ Official_country, summary_data, sum)
 
 {
-continent <- data.frame(
-  Official_country = c(
-    "Netherlands", "New Zealand", "Nicaragua", "Niger", "Nigeria", "North Korea", "North Macedonia", "Norway", "Oman",
-    "Pakistan", "Palestine", "Panama", "Papua New Guinea", "Paraguay", "Peru", "Philippines", "Poland", "Portugal",
-    "Qatar", "Republic of the Congo", "Romania", "Russia", "Rwanda", "Saint Kitts and Nevis", "Saint Lucia", "Saint Vincent and the Grenadines",
-    "Samoa", "San Marino", "Saudi Arabia", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "Singapore", "Slovakia",
-    "Slovenia", "Solomon Islands", "Somalia", "South Africa", "South Korea", "South Sudan", "Spain", "Sri Lanka", "Sudan",
-    "Suriname", "Sweden", "Switzerland", "Syria", "Taiwan", "Tajikistan", "Tanzania", "Thailand", "Togo", "Tonga",
-    "Trinidad and Tobago", "Tunisia", "Turkey", "Turkmenistan", "Tuvalu", "Uganda", "Ukraine", "United Arab Emirates",
-    "United Kingdom", "United States of America", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela",
-    "Vietnam", "Yemen", "Zambia", "Zimbabwe"
-  ),
-  Continent = c(
-    "Europe", "Oceania", "North America", "Africa", "Africa", "Asia", "Europe", "Europe", "Asia",
-    "Asia", "Asia", "North America", "Oceania", "South America", "South America", "Asia", "Europe", "Europe",
-    "Asia", "Africa", "Europe", "Europe/Asia", "Africa", "North America", "North America", "North America",
-    "Oceania", "Europe", "Asia", "Africa", "Europe", "Africa", "Africa", "Asia", "Europe",
-    "Europe", "Oceania", "Africa", "Africa", "Asia", "Africa", "Europe", "Asia", "Africa",
-    "South America", "Europe", "Europe", "Asia", "Asia", "Asia", "Africa", "Asia", "Africa", "Oceania",
-    "North America", "Africa", "Asia", "Asia", "Oceania", "Africa", "Europe", "Asia",
-    "Europe", "North America", "South America", "Asia", "Oceania", "Europe", "South America",
-    "Asia", "Asia", "Africa", "Africa"
+  continent <- data.frame(
+    Official_country = c(
+      "Netherlands", "New Zealand", "Nicaragua", "Niger", "Nigeria", "North Korea", "North Macedonia", "Norway", "Oman",
+      "Pakistan", "Palestine", "Panama", "Papua New Guinea", "Paraguay", "Peru", "Philippines", "Poland", "Portugal",
+      "Qatar", "Republic of the Congo", "Romania", "Russia", "Rwanda", "Saint Kitts and Nevis", "Saint Lucia", "Saint Vincent and the Grenadines",
+      "Samoa", "San Marino", "Saudi Arabia", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "Singapore", "Slovakia",
+      "Slovenia", "Solomon Islands", "Somalia", "South Africa", "South Korea", "South Sudan", "Spain", "Sri Lanka", "Sudan",
+      "Suriname", "Sweden", "Switzerland", "Syria", "Taiwan", "Tajikistan", "Tanzania", "Thailand", "Togo", "Tonga",
+      "Trinidad and Tobago", "Tunisia", "Turkey", "Turkmenistan", "Tuvalu", "Uganda", "Ukraine", "United Arab Emirates",
+      "United Kingdom", "United States of America", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela",
+      "Vietnam", "Yemen", "Zambia", "Zimbabwe"
+    ),
+    Continent = c(
+      "Europe", "Oceania", "North America", "Africa", "Africa", "Asia", "Europe", "Europe", "Asia",
+      "Asia", "Asia", "North America", "Oceania", "South America", "South America", "Asia", "Europe", "Europe",
+      "Asia", "Africa", "Europe", "Europe/Asia", "Africa", "North America", "North America", "North America",
+      "Oceania", "Europe", "Asia", "Africa", "Europe", "Africa", "Africa", "Asia", "Europe",
+      "Europe", "Oceania", "Africa", "Africa", "Asia", "Africa", "Europe", "Asia", "Africa",
+      "South America", "Europe", "Europe", "Asia", "Asia", "Asia", "Africa", "Asia", "Africa", "Oceania",
+      "North America", "Africa", "Asia", "Asia", "Oceania", "Africa", "Europe", "Asia",
+      "Europe", "North America", "South America", "Asia", "Oceania", "Europe", "South America",
+      "Asia", "Asia", "Africa", "Africa"
+    )
   )
-)
-additional_countries <- data.frame(
-  Official_country = c(
-    "Malaysia", "Mali", "Malta", "Mauritania", "Mauritius", "Mexico",
-    "Micronesia, Federated States of", "Moldova", "Mongolia", "Montenegro",
-    "Morocco", "Mozambique", "Myanmar", "Namibia", "Nepal", "Republic of Serbia",
-    "Russian Federation", "Syrian Arab Republic", "Tanzania, United Republic of",
-    "Timor-Leste", "United Kingdom of Great Britain and Northern Ireland",
-    "United Republic of Tanzania", "Viet Nam"
-  ),
-  Continent = c(
-    "Asia", "Africa", "Europe", "Africa", "Africa", "North America",
-    "Oceania", "Europe", "Asia", "Europe",
-    "Africa", "Africa", "Asia", "Africa", "Asia", "Europe",
-    "Europe", "Asia", "Africa",
-    "Asia", "Europe",
-    "Africa", "Asia"
+  additional_countries <- data.frame(
+    Official_country = c(
+      "Malaysia", "Mali", "Malta", "Mauritania", "Mauritius", "Mexico",
+      "Micronesia, Federated States of", "Moldova", "Mongolia", "Montenegro",
+      "Morocco", "Mozambique", "Myanmar", "Namibia", "Nepal", "Republic of Serbia",
+      "Russian Federation", "Syrian Arab Republic", "Tanzania, United Republic of",
+      "Timor-Leste", "United Kingdom of Great Britain and Northern Ireland",
+      "United Republic of Tanzania", "Viet Nam"
+    ),
+    Continent = c(
+      "Asia", "Africa", "Europe", "Africa", "Africa", "North America",
+      "Oceania", "Europe", "Asia", "Europe",
+      "Africa", "Africa", "Asia", "Africa", "Asia", "Europe",
+      "Europe", "Asia", "Africa",
+      "Asia", "Europe",
+      "Africa", "Asia"
+    )
   )
-)
-countries_continents <- data.frame(
-  Official_country = c(
-    "Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Argentina", "Armenia", "Australia", "Austria",
-    "Azerbaijan", "Bahrain", "Bangladesh", "Belarus", "Belgium", "Belize", "Benin", "Bhutan", "Bolivia",
-    "Bosnia and Herzegovina", "Botswana", "Brazil", "Brunei", "Brunei Darussalam", "Bulgaria", "Burkina Faso",
-    "Burundi", "Cambodia", "Cameroon", "Canada", "Cape Verde", "Central African Republic", "Chad", "Chile",
-    "China", "Colombia", "Costa Rica", "Croatia", "Cuba", "Cyprus", "Czech Republic", "Czechia", "Democratic Republic of the Congo",
-    "Denmark", "Djibouti", "Dominica", "Dominican Republic", "East Timor", "Ecuador", "Egypt", "El Salvador",
-    "Equatorial Guinea", "Estonia", "Eswatini", "Ethiopia", "Fiji", "Finland", "France", "Gabon", "Gambia",
-    "Georgia", "Germany", "Ghana", "Greece", "Greenland", "Guatemala", "Guinea", "Guinea-Bissau", "Guyana",
-    "Haiti", "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq"
-    # ... Add more countries as needed
-  ),
-  Continent = c(
-    "Asia", "Europe", "Africa", "Europe", "Africa", "South America", "Asia", "Oceania", "Europe",
-    "Asia", "Asia", "Asia", "Europe", "Europe", "North America", "Africa", "Asia", "South America",
-    "Europe", "Africa", "South America", "Asia", "Asia", "Europe", "Africa",
-    "Africa", "Asia", "Africa", "North America", "Africa", "Africa", "Africa", "South America",
-    "Asia", "South America", "North America", "Europe", "North America", "Asia", "Europe", "Europe", "Africa",
-    "Europe", "Africa", "North America", "North America", "Asia", "South America", "Africa", "North America",
-    "Africa", "Europe", "Africa", "Africa", "Oceania", "Europe", "Europe", "Africa", "Africa",
-    "Asia", "Europe", "Africa", "Europe", "North America", "North America", "Africa", "Africa", "South America",
-    "North America", "North America", "Europe", "Europe", "Asia", "Asia", "Asia", "Asia"
-    # ... Add continents for more countries as needed
+  countries_continents <- data.frame(
+    Official_country = c(
+      "Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Argentina", "Armenia", "Australia", "Austria",
+      "Azerbaijan", "Bahrain", "Bangladesh", "Belarus", "Belgium", "Belize", "Benin", "Bhutan", "Bolivia",
+      "Bosnia and Herzegovina", "Botswana", "Brazil", "Brunei", "Brunei Darussalam", "Bulgaria", "Burkina Faso",
+      "Burundi", "Cambodia", "Cameroon", "Canada", "Cape Verde", "Central African Republic", "Chad", "Chile",
+      "China", "Colombia", "Costa Rica", "Croatia", "Cuba", "Cyprus", "Czech Republic", "Czechia", "Democratic Republic of the Congo",
+      "Denmark", "Djibouti", "Dominica", "Dominican Republic", "East Timor", "Ecuador", "Egypt", "El Salvador",
+      "Equatorial Guinea", "Estonia", "Eswatini", "Ethiopia", "Fiji", "Finland", "France", "Gabon", "Gambia",
+      "Georgia", "Germany", "Ghana", "Greece", "Greenland", "Guatemala", "Guinea", "Guinea-Bissau", "Guyana",
+      "Haiti", "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq"
+      # ... Add more countries as needed
+    ),
+    Continent = c(
+      "Asia", "Europe", "Africa", "Europe", "Africa", "South America", "Asia", "Oceania", "Europe",
+      "Asia", "Asia", "Asia", "Europe", "Europe", "North America", "Africa", "Asia", "South America",
+      "Europe", "Africa", "South America", "Asia", "Asia", "Europe", "Africa",
+      "Africa", "Asia", "Africa", "North America", "Africa", "Africa", "Africa", "South America",
+      "Asia", "South America", "North America", "Europe", "North America", "Asia", "Europe", "Europe", "Africa",
+      "Europe", "Africa", "North America", "North America", "Asia", "South America", "Africa", "North America",
+      "Africa", "Europe", "Africa", "Africa", "Oceania", "Europe", "Europe", "Africa", "Africa",
+      "Asia", "Europe", "Africa", "Europe", "North America", "North America", "Africa", "Africa", "South America",
+      "North America", "North America", "Europe", "Europe", "Asia", "Asia", "Asia", "Asia"
+      # ... Add continents for more countries as needed
+    )
   )
-)
-additional_countries2 <- data.frame(
-  Official_country = c(
-     "Iran", "Ireland", "Israel", "Italy", "Ivory Coast", "Jamaica", "Japan",
-    "Jordan", "Kazakhstan", "Kenya", "Kiribati", "Korea, Republic of", "Kuwait", "Kyrgyzstan",
-    "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia", "Libya", "Liechtenstein", "Lithuania",
-    "Luxembourg", "Macedonia", "Madagascar", "Malawi"
-  ),
-  Continent = c(
-     "Asia", "Europe", "Asia", "Europe", "Africa", "North America", "Asia",
-    "Asia", "Asia", "Africa", "Oceania", "Asia", "Asia", "Asia",
-    "Asia", "Europe", "Asia", "Africa", "Africa", "Africa", "Europe", "Europe",
-    "Europe", "Europe", "Africa", "Africa"
+  additional_countries2 <- data.frame(
+    Official_country = c(
+      "Iran", "Ireland", "Israel", "Italy", "Ivory Coast", "Jamaica", "Japan",
+      "Jordan", "Kazakhstan", "Kenya", "Kiribati", "Korea, Republic of", "Kuwait", "Kyrgyzstan",
+      "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia", "Libya", "Liechtenstein", "Lithuania",
+      "Luxembourg", "Macedonia", "Madagascar", "Malawi"
+    ),
+    Continent = c(
+      "Asia", "Europe", "Asia", "Europe", "Africa", "North America", "Asia",
+      "Asia", "Asia", "Africa", "Oceania", "Asia", "Asia", "Asia",
+      "Asia", "Europe", "Asia", "Africa", "Africa", "Africa", "Europe", "Europe",
+      "Europe", "Europe", "Africa", "Africa"
+    )
   )
-)
-continent_classification <- rbind(continent, additional_countries,additional_countries2, countries_continents)
+  continent_classification <- rbind(continent, additional_countries,additional_countries2, countries_continents)
 }
 summary_data2<- left_join(summary_data, continent_classification, by ="Official_country")
 summary_data2<- summary_data2[-75,]
@@ -1851,7 +1852,7 @@ unique(summary_data3_sf$billion)
 # 86.25417 167.49703 101.76638 104.02232  21.06123  51.22130
 
 p2<-tm_shape(summary_data3_sf,
-         projection = "+proj=eck4") +
+             projection = "+proj=eck4") +
   tm_polygons("billion",
               palette = "OrRd",
               title = "Cost in US$ billion",
@@ -1896,28 +1897,28 @@ for (t in type) {
   summary_data <- aggregate(billion ~ Official_country, all1, sum)
   
   {
-  summary_data$Official_country[summary_data$Official_country== 'Viet Nam'] = 'Vietnam'
-  summary_data$Official_country[summary_data$Official_country== 'Czechia'] = 'Czech Republic'
-  summary_data$Official_country[summary_data$Official_country== 'Brunei Darussalam'] = 'Brunei'
-  summary_data$Official_country[summary_data$Official_country== 'Syrian Arab Republic'] = 'Syria'
-  #summary_data$Official_country[summary_data$Official_country== 'Greenland'] = 'Vietnam'
-  summary_data$Official_country[summary_data$Official_country== 'Guinea-Bissau'] = 'Guinea Bissau'
-  summary_data$Official_country[summary_data$Official_country== 'Iran, Islamic Republic of'] = 'Iran'
-  summary_data$Official_country[summary_data$Official_country== 'Korea, Republic of'] = 'South Korea'
-  summary_data$Official_country[summary_data$Official_country== 'Micronesia, Federated States of'] = 'Federated States of Micronesia'
-  summary_data$Official_country[summary_data$Official_country== 'Russian Federation'] = 'Russia'
-  summary_data$Official_country[summary_data$Official_country== 'Serbia'] = 'Republic of Serbia'
-  summary_data$Official_country[summary_data$Official_country== 'Syrian Arab Republic'] = 'Syrian Arab Republic'
-  summary_data$Official_country[summary_data$Official_country== 'Tanzania, United Republic of'] = 'United Republic of Tanzania'
-  summary_data$Official_country[summary_data$Official_country== 'Timor-Leste'] = 'East Timor'
-  summary_data$Official_country[summary_data$Official_country== 'United Kingdom of Great Britain and Northern Ireland'] = 'United Kingdom'
-  
-  
-  summary_data$Official_country[summary_data$Official_country== 'Cape verde'] = 'Cape Verde'
-  summary_data$Official_country[summary_data$Official_country== 'Vietnam'] = 'Viet Nam'
-  summary_data$Official_country[summary_data$Official_country== 'United Kingdom'] = 'United Kingdom of Great Britain and Northern Ireland'
-  summary_data$Official_country[summary_data$Official_country== 'Iran, Islamic Republic of'] = 'Iran'
-  summary_data$Official_country[summary_data$Official_country== 'Russia'] = 'Russian Federation'
+    summary_data$Official_country[summary_data$Official_country== 'Viet Nam'] = 'Vietnam'
+    summary_data$Official_country[summary_data$Official_country== 'Czechia'] = 'Czech Republic'
+    summary_data$Official_country[summary_data$Official_country== 'Brunei Darussalam'] = 'Brunei'
+    summary_data$Official_country[summary_data$Official_country== 'Syrian Arab Republic'] = 'Syria'
+    #summary_data$Official_country[summary_data$Official_country== 'Greenland'] = 'Vietnam'
+    summary_data$Official_country[summary_data$Official_country== 'Guinea-Bissau'] = 'Guinea Bissau'
+    summary_data$Official_country[summary_data$Official_country== 'Iran, Islamic Republic of'] = 'Iran'
+    summary_data$Official_country[summary_data$Official_country== 'Korea, Republic of'] = 'South Korea'
+    summary_data$Official_country[summary_data$Official_country== 'Micronesia, Federated States of'] = 'Federated States of Micronesia'
+    summary_data$Official_country[summary_data$Official_country== 'Russian Federation'] = 'Russia'
+    summary_data$Official_country[summary_data$Official_country== 'Serbia'] = 'Republic of Serbia'
+    summary_data$Official_country[summary_data$Official_country== 'Syrian Arab Republic'] = 'Syrian Arab Republic'
+    summary_data$Official_country[summary_data$Official_country== 'Tanzania, United Republic of'] = 'United Republic of Tanzania'
+    summary_data$Official_country[summary_data$Official_country== 'Timor-Leste'] = 'East Timor'
+    summary_data$Official_country[summary_data$Official_country== 'United Kingdom of Great Britain and Northern Ireland'] = 'United Kingdom'
+    
+    
+    summary_data$Official_country[summary_data$Official_country== 'Cape verde'] = 'Cape Verde'
+    summary_data$Official_country[summary_data$Official_country== 'Vietnam'] = 'Viet Nam'
+    summary_data$Official_country[summary_data$Official_country== 'United Kingdom'] = 'United Kingdom of Great Britain and Northern Ireland'
+    summary_data$Official_country[summary_data$Official_country== 'Iran, Islamic Republic of'] = 'Iran'
+    summary_data$Official_country[summary_data$Official_country== 'Russia'] = 'Russian Federation'
   }
   
   summary_data <- aggregate(billion ~ Official_country, summary_data, sum)
@@ -2012,7 +2013,7 @@ for (t in type) {
   unique(summary_data2$Continent)
   
   summary_data3 <- aggregate(billion ~ Continent, summary_data2, sum)
-
+  
   world_continents <- aggregate(world["pop_est"], by = list(Continent = world$continent), FUN = sum)
   summary_data3_sf <- merge(world_continents, summary_data3, by = "Continent")
   unique(summary_data3_sf$billion)
@@ -2065,7 +2066,7 @@ for (t in type) {
         frame = FALSE,
         legend.title.size = 1.5,
         legend.text.size = 1)
-    }
+  }
   
   if(exists("p3") && exists("p4")) {
     tmap_arrange(p3, p4, ncol = 1)
@@ -2202,11 +2203,11 @@ for (t in type) {
   
   summary_data2 <- summary_data2 %>%
     mutate(Continent = case_when(
-        Official_country == "Guinea Bissau" & is.na(Continent)~ "Africa", 
-        Official_country == "Federated States of Micronesia" & is.na(Continent) ~ "Oceania", 
-        TRUE ~ Continent  ) )
-        
-        
+      Official_country == "Guinea Bissau" & is.na(Continent)~ "Africa", 
+      Official_country == "Federated States of Micronesia" & is.na(Continent) ~ "Oceania", 
+      TRUE ~ Continent  ) )
+  
+  
   summary_data3 <- aggregate(billion ~ Continent, summary_data2, sum)
   
   world_continents <- aggregate(world["pop_est"], by = list(Continent = world$continent), FUN = sum)
@@ -2273,12 +2274,12 @@ result<- data.frame( Continent = c(
   "Africa", "Africa", "Asia", "Asia", "Europe", "Europe", "North America", "North America", 
   "Oceania", "Oceania", "South America","South America"),
   Cost = c(
-  "7.138356", "NA", "26.445278", "NA", "10.893983", "NA", "30.207596", "NA", "7.614172",
-  "NA", "9.623879", "NA"),
+    "7.138356", "NA", "26.445278", "NA", "10.893983", "NA", "30.207596", "NA", "7.614172",
+    "NA", "9.623879", "NA"),
   type = c("Damage", "Management", "Damage", "Management","Damage", "Management","Damage", "Management",
            "Damage", "Management","Damage", "Management"),
   Cost2 = c("6.546608", "0.5917476", "25.259031", "1.1862472","9.900570", "0.9934137","17.025630", "13.1819663",
-           "6.748986", "0.8651866","8.505013", "1.1188667"),
+            "6.748986", "0.8651866","8.505013", "1.1188667"),
   Interpolated = c(
     "86.25417", "NA", "164.48835", "NA", "101.76638", "NA", "104.02232", "NA", "21.06123",
     "NA", "51.22130", "NA"),
@@ -2308,7 +2309,7 @@ for(perc in percentage) {
       tm_polygons("PercentageChange",
                   palette = "OrRd",
                   title = "Percentage of change",
-                   breaks = breaks,
+                  breaks = breaks,
                   # style="pretty"
       )+
       tm_layout(
@@ -2338,7 +2339,7 @@ for(perc in percentage) {
       tm_polygons("PercentageChange",
                   palette = "OrRd",
                   title = "Percentage of change",
-                   breaks = breaks,
+                  breaks = breaks,
                   # style="pretty"
       )+
       tm_layout(
@@ -2369,7 +2370,7 @@ for(perc in percentage) {
       tm_polygons("PercentageChange",
                   palette = "OrRd",
                   title = "Percentage of change",
-                   breaks = breaks,
+                  breaks = breaks,
                   #  style="pretty"
       )+
       tm_layout(
@@ -2604,7 +2605,7 @@ for (c in costs) {
     plot_id <- paste(c, t, sep = "_")
     
     if (t == "percentage") {
-
+      
       invacost_data <- all1 %>% filter(type == "Invacost")
       interpolated_data <- all1 %>% filter(type == "Interpolated")
       
@@ -2634,11 +2635,11 @@ for (c in costs) {
     
     
     if (t == "percentage") {
-
+      
       p <- tm_shape(summary_data3_sf,
                     projection = "+proj=eck4") +
         tm_polygons("Percentage_Increase",
-                     palette = custom_palette1,
+                    palette = custom_palette1,
                     #palette = "OrRd",
                     title = "Percentage of increase (%)",
                     style = "fixed" ,   
@@ -2662,31 +2663,31 @@ for (c in costs) {
       
     } else {
       
-    p <- tm_shape(summary_data3_sf,
-                  projection = "+proj=eck4") +
-      tm_polygons("billion",
-                  palette = custom_palette,
-                  title = "Economic cost is US$ billion",
-                  breaks = breaks
-      ) +
-      tm_layout(
-        legend.bg.color = "white",
-        inner.margins = c(.04, .01, .1, .01),
-        bg.color = "#AEDFE5",
-        outer.bg.color = "white",
-        earth.boundary = c(-180, 180, -65, 90),
-        earth.boundary.color = "white",
-        earth.boundary.lwd = .4,
-        space.color = "white",
-        attr.outside = T,
-        attr.color = "grey20",
-        frame = FALSE,
-        legend.title.size = 1.5,
-        legend.text.size = 1)
-    
-    plot_list[[plot_id]] <- p
+      p <- tm_shape(summary_data3_sf,
+                    projection = "+proj=eck4") +
+        tm_polygons("billion",
+                    palette = custom_palette,
+                    title = "Economic cost is US$ billion",
+                    breaks = breaks
+        ) +
+        tm_layout(
+          legend.bg.color = "white",
+          inner.margins = c(.04, .01, .1, .01),
+          bg.color = "#AEDFE5",
+          outer.bg.color = "white",
+          earth.boundary = c(-180, 180, -65, 90),
+          earth.boundary.color = "white",
+          earth.boundary.lwd = .4,
+          space.color = "white",
+          attr.outside = T,
+          attr.color = "grey20",
+          frame = FALSE,
+          legend.title.size = 1.5,
+          legend.text.size = 1)
+      
+      plot_list[[plot_id]] <- p
     }
-}
+  }
 }
 
 names(plot_list)
@@ -2860,11 +2861,3 @@ colorPalette <- c(colorPalette, tail(colorPalette, n=1)) # Extend the palette by
 # Plot the raster with breaks and the corresponding color palette
 plot(log_raster, breaks=breaks, col=colorPalette, main="Log-Scaled Cumulative Cost Raster",
      xlab="Longitude", ylab="Latitude")
-
-
-
-
-
-
-
-
