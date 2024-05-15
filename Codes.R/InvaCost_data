@@ -220,7 +220,7 @@ for(s in sp){
     pred("hasCoordinate", TRUE),
     pred_lte("coordinateUncertaintyInMeters", 50), 
     user = "ismaelsoto",
-    pwd = "Ismaputas123.",
+    pwd = "*******3.",
     email = "isma-sa@hotmail.com"
   )
   status <- occ_download_meta(x)$status
