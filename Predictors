@@ -28,6 +28,7 @@ GBIF <- "C:/Users/isma-/Downloads/gbif_all_density_06-2022.tif"
 GBIF <- raster(GBIF)
 
 
+setwd("C:/Users/")
 
 # Other predictors -------------------- Note: I have two elevation and two evapotrans
 
