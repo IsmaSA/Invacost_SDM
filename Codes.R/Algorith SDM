@@ -192,327 +192,6 @@ for (n in spn) {
 
 
 
-
-
-# Option B
-
-
-sp <- read_xlsx("Species_ID.xlsx")
-env <- read_xlsx("ID_predictors.xlsx")
-background <- read_xlsx("pseudoabsences.xlsx")
-all_cells <- read.csv2("All_cells_values.csv")
-
-
-spn <- unique(sp$species)
-spn<- spn[1:3]
-n <- spn[1]
-
-#We will need this to proyect the results
-world_extent <- extent(-180, 179, -56, 84)
-prediction_raster <- raster(world_extent, resolution = 0.08333333)
-
-#To apply the mask
-bio <- raster::getData('worldclim', var='bio', res=5)
-
-#AUC
-AUC_df <- data.frame(species = character(), auc = numeric(), stringsAsFactors = FALSE)
-gam_models <- list()
-
-
-for (n in spn) {
-  sp1<- sp[sp$species == n,]
-  sp1$presence <- 1
-  
-  if (nrow(sp1) < 10) {
-    next  
-  }
-  
-  #Species data + env data
-  sp1_env <- right_join(env,sp1, by= "cell.id")  # bg PLANTS
-  
-  #Background data + env data
-  if ("Plants" %in% unique(sp1$Order)) {
-    data <- right_join(predictors_bg, background5, by="cell.id")  # bg PLANTS
-    
-  } else if ("Arthropods" %in% unique(sp1$Order)) {
-    data <- right_join(predictors_bg, background3, by="cell.id")  # bg Arthropods
-    
-  } else if ("All_density" %in% unique(sp1$Order)) {
-    data <- right_join(predictors_bg, background1, by="cell.id")  # bg All_density
-    
-  } else if ("Reptilia" %in% unique(sp1$Order)) {
-    data <- right_join(predictors_bg, background6, by="cell.id")  # bg Reptilia
-    
-  } else if ("Mammalia" %in% unique(sp1$Order)) {
-    data <- right_join(predictors_bg, background4, by="cell.id")  # bg Mammalia
-    
-  } else if ("Amphibia" %in% unique(sp1$Order)) {
-    data <- right_join(predictors_bg, background2, by="cell.id")  # bg Amphibia
-  }
-  
-  
-  SDM_data<- bind_rows(sp1_env,data) # presence + bg
-  
-  SDM_data$presence <- ifelse(is.na(SDM_data$presence), 0, SDM_data$presence)
-  
-  #Additional step to retain full variables with predictors:
-  SDM_data <- SDM_data[complete.cases(SDM_data$bioclim.bio1), ]
-  
-  SDM_data$presence <- as.factor(SDM_data$presence)
-  
- #Split in train and evalutaion --> Not for now
-  #indices <- sample(nrow(SDM_data))
-  #n_train <- round(0.7 * nrow(SDM_data))
-
-  #train_data <- SDM_data[indices[1:n_train], ]
-  #val_data <- SDM_data[indices[(n_train+1):nrow(SDM_data)], ]
-  
-  
-  #Start modelling
-  response<- SDM_data$presence
-  predictors <- c("bioclim.bio2","bioclim.bio3", "bioclim.bio8","bioclim.bio9","bioclim.bio13","bioclim.bio14","bioclim.bio15","bioclim.bio18","bioclim.bio19", "Elevation", "Slope","Roads")
-  formula <- as.formula(paste("presence ~", paste0("s(", predictors, ", k = 5)", collapse = "+")))
-  
-  GAM_model <- gam(formula, data = SDM_data, family = binomial, select = TRUE)
-  
-  #  #Check concurvity:
-  #  concurvity_threshold <- 0.8
-  #worst_concurvity <- 1 
-  #predictor_to_remove <- NULL  
-  
-  #  while (worst_concurvity >= concurvity_threshold) {
-  #    predictors <- attr(terms(GAM_model), "term.labels")
-  #    worst_concurvity <- 0
-  #    
-  #    for (predictor in predictors) {
-  #      
-  #     formula_temp <- update(formula, . ~ . - eval(parse(text = predictor)))
-  #     GAM_model_temp <- gam(formula_temp, data = SDM_data, family = binomial, select = TRUE)
-  #     
-  #     resampled_data <- SDM_data
-  #      resampled_data$presence <- sample(resampled_data$presence)
-  #     
-  #     # Fit the GAM model with the resampled data
-  #     GAM_model_resampled <- gam(formula_temp, data = resampled_data, family = binomial, select = TRUE)
-  #     
-  #   
-  #     concurvity_value <- concurvity(GAM_model_temp) - concurvity(GAM_model_resampled)
-  #     worst_concurvity <- max(worst_concurvity, concurvity_value)
-  #    
-  #     if (worst_concurvity >= concurvity_threshold) {
-  #      predictor_to_remove <- predictor
-  #     }
-  #   }
-  #  
-  #  if (!is.null(predictor_to_remove)) {
-  #    
-  #    formula <- update(formula, . ~ . - eval(parse(text = predictor_to_remove)))
-  #     GAM_model <- gam(formula, data = train_data, family = binomial, select = TRUE)
-  #  }
-  # }
-  
-  
-
-  gc()
-  
-  cat("GAM model -->",n, ":\n")
-
-#plot(bioc[[1]])
-
-
-prediction <- predict(GAM_model, newdata = as.data.frame(bioc), type = "response", na.action = "na.pass")
-#range(prediction, na.rm = T)
-
-prediction_matrix <- matrix(prediction, nrow = ncol(bioc), ncol = nrow(bioc))
-prediction_matrix<- t(prediction_matrix)
-
-prediction_raster <- raster(prediction_matrix, xmn = extent(bioc)[1], xmx = extent(bioc)[2],
-                            ymn = extent(bioc)[3], ymx = extent(bioc)[4],
-                            crs = projection(bioc))
-
-values(prediction_raster) <- prediction_matrix
-
-
-#validation the model ---------------------------    (Not for now)
-#pred_probs <- prediction
-
-#binary_predictions <- ifelse(predicted_probs > 0.7, 1, 0)
-
-#auc<- roc(binary_predictions, pred_probs, na.rm=T)$auc
-#AUC_df <- rbind(AUC_df, data.frame(species = n, auc = auc))
-
- ## Cross validation 
-  
-  numFolds <- trainControl(method = "cv", number = 5)
-  cvFolds <- createFolds(train_data$presence, k = 5)
-  
-  tss <- vector()
-  auc <- vector()
-  #folds
-  for(i in 1:5){
-    
-    # Partition the data
-    trainIndex <- cvFolds[[i]]
-    cvTrainData <- train_data[trainIndex, ]
-    cvTestData <- train_data[-trainIndex, ]
-    
-    # Fit the model
-    GAM_model <- gam(presence ~ s(bioclim.bio2, k = 5) + s(bioclim.bio3, k = 5) + 
-                       s(bioclim.bio8, k = 5) + s(bioclim.bio9, k = 5) + s(bioclim.bio13, 
-                                                                           k = 5) + s(bioclim.bio14, k = 5) + s(bioclim.bio15, k = 5) + 
-                       s(bioclim.bio18, k = 5) + s(bioclim.bio19, k = 5) + s(Elevation, 
-                                                                             k = 5) + s(Slope, k = 5) + s(Roads, k = 5), 
-                     family = binomial(link = 'logit'), 
-                     data = cvTrainData)
-    
-    # Make predictions
-    pred <- predict(GAM_model, newdata = cvTestData, type = "response")
-    
-    # Compute AUC and store it
-    roc_obj <- roc(cvTestData$presence, pred)
-    auc[i] <- auc(roc_obj)
-    
-    
-    pred_class <- ifelse(pred > 0.5, 1, 0)  # Adjust the threshold if needed
-
-    # Compute confusion matrix
-    cm <- confusionMatrix(as.factor(pred_class), as.factor(cvTestData$presence))
-    
-    # Calculate Sensitivity and Specificity
-    sensitivity <- cm$table[2, 2] / (cm$table[2, 2] + cm$table[1, 2])
-    specificity <- cm$table[1, 1] / (cm$table[1, 1] + cm$table[2, 1])
-    
-    # Calculate TSS and store it
-    tss[i] <- sensitivity + specificity - 1
-    cat("*")
-  }
-  AUC_df <- rbind(AUC_df, data.frame(species = n, mean_auc = mean(auc),sd_auc = sd(auc),
-                                                 mean_tss = mean(tss), sd_tss = sd(tss) ))
-}
-AUC_df <- rbind(AUC_df, data.frame(species = n, auc = mean(auc)))
-
-
-
-
-
-# Lets save prediction raster as a file
-prediction_file <- file.path(folder_a, paste0("prediction_", n, ".tif")) 
-writeRaster(prediction_raster, filename = prediction_file, format = "GTiff", overwrite=TRUE)
-
-
-plot_file <- file.path(folder_b, paste0("plot_", n, ".pdf"))  # Save in folder B
-
-pdf(plot_file)
-plot(prediction_raster, main = n)
-
-dev.off()
-gc()
-cat("Plot -->",n, ":\n")
-}
-
-
-
-
-
-
-
-
-
-bio
-grid_extent <- extent(-180, 180, -60, 90)  
-
-
-## Predictors:
-predictors <- c("bioclim.bio2","bioclim.bio3", "bioclim.bio8","bioclim.bio9","bioclim.bio13","bioclim.bio14",
-                "bioclim.bio15","bioclim.bio18","bioclim.bio19", "Elevation", "Slope","Roads")
-
-
-
-
-##### Slope  ##### 
-file_path <- "C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost/slope_1KMmd_GMTEDmd.tif"
-
-Slope <- raster(file_path)
-plot(Slope)
-
-Slope <- crop(Slope, grid_extent) #crop to the dimension of BIOCLIM
-Slope <- projectRaster(Slope, bioc, method = "bilinear") #re-proyect
-Slope <- setNames(Slope, "Slope")
-plot(Slope)
-
-
-##### Elevation ##### 
-file_path <- "C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost/elevation_1KMmd_GMTEDmd.tif"
-
-Elevation <- raster(file_path)
-plot(Elevation)
-
-Elevation <- crop(Elevation, grid_extent) #crop to the dimension of BIOCLIM
-Elevation <- projectRaster(Elevation, bio, method = "bilinear") #re-proyect
-Elevation <- setNames(Elevation, "Elevation")
-plot(Elevation)
-
-
-
-
-#### Distance to the roads --> https://sedac.ciesin.columbia.edu/data/set/groads-global-roads-open-access-v1
-
-
-setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road")
-file_path <- "C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost/Distance_to_road/Density1.tiff"
-
-Roads <- raster(file_path)
-
-Roads <- crop(Roads, grid_extent) #crop to the dimension of BIOCLIM
-Roads <- projectRaster(Roads, bio, method = "bilinear") #re-proyect
-Roads <- setNames(Roads, "Roads")
-plot(Roads)
-
-
-
-###### Predictors ######
-
-predictors <- c("bioclim.bio2","bioclim.bio3", "bioclim.bio8","bioclim.bio9","bioclim.bio13","bioclim.bio14",
-                "bioclim.bio15","bioclim.bio18","bioclim.bio19", "Elevation", "Slope","Roads")
-
-#In case we want to drop some layer before
-remove <- c("bio1","bio4","bio5","bio6","bio7","bio10","bio11","bio12","bio16","bio17")
-bio <- raster::dropLayer(bio, remove)
-grid_extent <- extent(-180, 179, -56, 84)
-
-
-#resample
-bio_resampled <- resample(bio, bio)
-Elevation_resampled <- resample(Elevation, bio)
-Slope_resampled <- resample(Slope, bio)
-Roads <- resample(Roads, bio)
-
-#crops
-Roads <- crop(Roads, grid_extent) 
-Elevation_resampled <- crop(Elevation_resampled, grid_extent) 
-Slope_resampled <- crop(Slope_resampled, grid_extent) 
-bio_resampled <- crop(bio_resampled, grid_extent) 
-
-
-bioc <- stack(bio_resampled, 
-                    Elevation_resampled, 
-                    Slope_resampled,
-                    #Evapotranspiration_resampled,
-                    #Rugosity_resampled,
-                    Roads) # need to change the name later
-
-
-
-bioc
-names(bioc) <- c("bioclim.bio2","bioclim.bio3", "bioclim.bio8","bioclim.bio9","bioclim.bio13","bioclim.bio14",
-                 "bioclim.bio15","bioclim.bio18","bioclim.bio19", "Elevation", "Slope","Roads")
-
-
-
-
-
-
-
 ### Include also TSS / Boyce
 
 gc()
@@ -696,3 +375,688 @@ for (n in spn) {
   gc()
   cat("Boyce Index calculado para:", n, "= ", cbi_value,  "\n")
 }
+
+
+### Final version -----------
+# Other predictors -------------------- Note: I have two elevation and two evapotrans
+
+
+grid_extent <- extent(-180, 180, -60, 90)  
+raster_grid <- raster(grid_extent, resolution = 0.083333)
+
+# Distance to major cities
+
+cities <- rgdal::readOGR("World_Cities.shp")
+distance_raster <- distanceFromPoints(raster_grid, cities)
+distance_raster_masked <- mask(distance_raster, bio)
+writeRaster(distance_raster, filename = "distance_to_major_cities.tif", format = "GTiff")
+
+
+###############################################################################################################
+
+setwd("C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost")
+
+bio <- raster::getData('worldclim', var='bio', res=5)
+remove <- c("bio1","bio4","bio5","bio6","bio7","bio10","bio11","bio12","bio16","bio17")
+bio <- raster::dropLayer(bio, remove)
+Slope <- raster("slope_1KMmd_GMTEDmd.tif")
+Elevation <- raster("elevation_1KMmd_GMTEDmd.tif")
+Rugosity <- raster("roughness_1KMmd_GMTEDmd.tif")
+setwd("C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost/Distance_to_road")
+Roads <- raster("Density1.tiff")
+
+cities <- raster("distance_to_major_cities.tif")
+distance_cities <- mask(cities, bio)
+distance_cities <- distance_cities[[1]]
+
+grid_extent <- extent(-180, 180, -56, 84)
+ 
+
+setwd("C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost")
+  
+  
+  
+  ##### Slope  ##### 
+  file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/slope_1KMmd_GMTEDmd.tif"
+  
+  Slope <- raster("slope_1KMmd_GMTEDmd.tif")
+  Slope <- crop(Slope, grid_extent) #crop to the dimension of BIOCLIM
+  Slope <- projectRaster(Slope, bio[[1]], method = "bilinear") #re-proyect
+  Slope <- mask(Slope, bio[[1]]) #re-proyect
+  Slope <- setNames(Slope, "Slope")
+  plot(Slope)
+  
+  
+  ##### Elevation ##### 
+  file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/elevation_1KMmd_GMTEDmd.tif"
+  
+  Elevation <- raster("elevation_1KMmd_GMTEDmd.tif")
+  plot(Elevation)
+  
+  Elevation <- crop(Elevation, grid_extent) #crop to the dimension of BIOCLIM
+  Elevation <- projectRaster(Elevation, bio[[1]], method = "bilinear") #re-proyect
+  Elevation <- mask(Elevation, bio[[1]]) #re-proyect
+  Elevation <- setNames(Elevation, "Elevation")
+  plot(Elevation)
+  
+  
+  
+  ##### Rugosity ##### 
+  file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/roughness_1KMmd_GMTEDmd.tif"
+  
+  Rugosity <- raster(file_path)
+  plot(Rugosity)
+  
+  Rugosity <- crop(Rugosity, grid_extent) #crop to the dimension of BIOCLIM
+  Rugosity <- projectRaster(Rugosity, bio[[1]], method = "bilinear") #re-proyect
+  Rugosity <- setNames(Rugosity, "Rugosity")
+  plot(Rugosity)
+  
+  
+  #### Cities
+  distance_cities <- setNames(distance_cities, "Cities")
+  plot(distance_cities)
+  
+  
+  
+  #### Distance to the roads --> https://sedac.ciesin.columbia.edu/data/set/groads-global-roads-open-access-v1
+  road_map <- st_read("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/groads-v1-global-gdb/groads-v1-europe-shp/gROADS-v1-europe.shp")
+  road_map <- st_read("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/Roads.shp")
+  
+  
+  
+  setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road")
+  file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/Final_layer_Roads.tif"
+  
+  Roads <- raster(file_path)
+  
+  Roads <- crop(Roads, grid_extent) #crop to the dimension of BIOCLIM
+  Roads <- projectRaster(Roads, bio, method = "bilinear") #re-proyect
+  Roads <- setNames(Roads, "Roads")
+  
+  
+  
+
+  
+  ###### Predictors ######
+  bio <- raster::getData('worldclim', var='bio', res=5)
+  
+  #In case we want to drop some layer before
+  #remove <- c("bio1","bio2","bio3","bio10")
+  #bio <- raster::dropLayer(bio, remove)
+  grid_extent <- extent(-180, 179, -56, 84)
+  
+  
+  #resample
+  bio_resampled <- resample(bio, bio[[1]])
+  Elevation_resampled <- resample(Elevation, bio[[1]])
+  Slope_resampled <- resample(Slope, bio[[1]])
+  Rugosity_resampled <- resample(Rugosity, bio[[1]])
+  Roads <- resample(Roads, bio[[1]])
+  
+  #crops
+  Roads <- crop(Roads, grid_extent) 
+  Elevation_resampled <- crop(Elevation_resampled, grid_extent) 
+  Slope_resampled <- crop(Slope_resampled, grid_extent) 
+  Rugosity_resampled <- crop(Rugosity_resampled, grid_extent) 
+  bio_resampled <- crop(bio_resampled, grid_extent) 
+  cities_resampled <- crop(distance_cities, grid_extent) 
+  
+  
+  Elevation_resampled <- mask(Elevation_resampled, bio_resampled[[1]]) 
+  Slope_resampled <- mask(Slope_resampled, bio_resampled[[1]]) #re-proyect
+  Rugosity_resampled <- mask(Rugosity_resampled, bio_resampled[[1]]) #re-proyect
+  Roads <- mask(Roads, bio_resampled[[1]]) #re-proyect
+  
+  
+  predictors <- stack(bio_resampled, 
+                      Elevation_resampled, 
+                      Slope_resampled,
+                      cities_resampled,
+                      Rugosity_resampled,
+                      Roads) # need to change the name later
+  
+
+v <- vifstep(predictors) 
+vif(predictors) 
+v
+
+##   Modelling SDMs ----------
+
+  env <- read_xlsx("ID_predictors.xlsx")
+  invacost <- read_xlsx("Species_ID.xlsx")
+  
+  setwd("C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost/Background_points")
+  background1 <- read_xlsx("bg_cells_all.xlsx")
+  background2 <- read_xlsx("bg_cells_amph.xlsx")
+  background3 <- read_xlsx("bg_cells_arth.xlsx")
+  background4 <- read_xlsx("bg_cells_mammals.xlsx")
+  background5 <- read_xlsx("bg_cells_plants.xlsx")
+  background6 <- read_xlsx("bg_cells_reptiles.xlsx")
+  predictors_bg <- read_xlsx("predictors_bg.xlsx")
+  
+  
+  spn <- unique(invacost$species)
+  n <- spn[1]
+  
+  #We will need this to proyect the results
+  world_extent <- extent(-180, 179, -56, 84)
+  prediction_raster <- raster(world_extent, resolution = 0.08333333)
+  grid_extent <- extent(-180, 179, -56, 84)
+  
+  #To apply the mask
+  #Note: bioc is in collinearity script
+  
+  AUC_df <- data.frame(species = character(), auc = numeric(),tss = numeric(),
+                       boyce= numeric(), stringsAsFactors = FALSE)
+  
+  #Folders directory
+  folder_a <- "Raster_model"  # Folder to save raster files
+  folder_b <- "PDF_plot"  # Folder to save plot PDFs
+  
+  # Create the folders if they don't exist
+  dir.create(folder_a, showWarnings = FALSE)
+  dir.create(folder_b, showWarnings = FALSE)
+  
+  
+  #predictors <- c("bioclim.bio2","bioclim.bio3", "bioclim.bio8","bioclim.bio9","bioclim.bio13","bioclim.bio14","bioclim.bio15","bioclim.bio18","bioclim.bio19", "Elevation", "Slope","Roads")
+  names(predictors) <- c("bioclim.bio2","bioclim.bio3", "bioclim.bio8","bioclim.bio9","bioclim.bio13","bioclim.bio14","bioclim.bio15","bioclim.bio18","bioclim.bio19", "Elevation", "Slope","Cities","Rugosity", "Roads1")
+  
+  folder_path <- setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/PDF_plot")  # Replace with the path to your folder
+  file_names <- list.files(folder_path)
+  species_names <- gsub("^plot_|\\.pdf$", "", file_names)
+  species_names
+  
+  processed_species <- species_names  
+  to_process <- setdiff(spn, processed_species) 
+  
+  ## GAMs ----------
+  
+  counter <- 1
+  for (n in to_process) {
+    sp1<- invacost[invacost$species == n,]
+    sp1$presence <- 1
+    
+    if (nrow(sp1) < 10) {
+      next  
+    }
+    
+    #Species data + env data
+    sp1_env <- right_join(env,sp1, by= "cell.id")  
+    
+    #Background data + env data
+    if ("Plants" %in% unique(sp1$Order)) {
+      data <- right_join(predictors_bg, background5, by="cell.id")  # bg PLANTS
+      
+    } else if ("Arthropods" %in% unique(sp1$Order)) {
+      data <- right_join(predictors_bg, background3, by="cell.id")  # bg Arthropods
+      
+    } else if ("All_density" %in% unique(sp1$Order)) {
+      data <- right_join(predictors_bg, background1, by="cell.id")  # bg All_density
+      
+    } else if ("Reptilia" %in% unique(sp1$Order)) {
+      data <- right_join(predictors_bg, background6, by="cell.id")  # bg Reptilia
+      
+    } else if ("Mammalia" %in% unique(sp1$Order)) {
+      data <- right_join(predictors_bg, background4, by="cell.id")  # bg Mammalia
+      
+    } else if ("Amphibia" %in% unique(sp1$Order)) {
+      data <- right_join(predictors_bg, background2, by="cell.id")  # bg Amphibia
+    }
+    
+    
+    SDM_data<- bind_rows(sp1_env,data) # presence + bg
+    
+    SDM_data$presence <- ifelse(is.na(SDM_data$presence), 0, SDM_data$presence)
+    
+    #Additional step to retain full variables with predictors in case is needed:
+    SDM_data <- SDM_data[complete.cases(SDM_data$bioclim.bio1), ]
+    
+    SDM_data$presence <- as.factor(SDM_data$presence)
+    
+    
+    #Start modelling
+    response<- SDM_data$presence
+    pred <- c("bioclim.bio2","bioclim.bio3", "bioclim.bio8","bioclim.bio9","bioclim.bio13","bioclim.bio14","bioclim.bio15","bioclim.bio18","bioclim.bio19", "Elevation", "Slope","Roads1","Cities")
+    formula <- as.formula(paste("presence ~", paste0("s(", pred, ", k = 5)", collapse = "+")))
+    
+    GAM_model <- gam(formula, data = SDM_data, family = binomial, select = TRUE,method = "GCV.Cp")
+    
+    #  #Check concurvity:
+    repeat { 
+      concurvity_results <- concurvity(GAM_model)
+      worst_predictors <- concurvity_results["worst",]
+      worst_predictor_index <- which.max(worst_predictors)
+      max_concurvity <- worst_predictors[worst_predictor_index]
+      
+      if (max_concurvity < 0.8) {
+        break 
+      }
+      
+      predictor_to_remove <- names(worst_predictors)[worst_predictor_index]
+      predictor_to_remove <- substring(predictor_to_remove, 1, nchar(predictor_to_remove) - 1)
+      predictor_to_remove <- paste0(predictor_to_remove, ", k = 5)")
+  
+      terms <- attr(terms(formula), "term.labels")
+      terms <- terms[!terms %in% predictor_to_remove]
+      
+      formula <- reformulate(terms, response = "presence")
+      GAM_model <- gam(formula, data = SDM_data, family = binomial, select = TRUE,method = "GCV.Cp")
+  }
+    # End concurvitiy
+    
+    cat("GAM model -->",n, "\n")
+    
+    formula_terms <- all.vars(formula)[-1]
+    predictor_names <- sapply(formula_terms, function(x) gsub("s\\(|, k = 5\\)", "", x))
+    filtered_predictors <- predictors[[which(names(predictors) %in% predictor_names)]]
+    
+    
+    prediction <- predict(GAM_model, newdata = as.data.frame(filtered_predictors), type = "response", na.action = "na.pass")
+    #range(prediction, na.rm = T)
+    
+    prediction_matrix <- matrix(prediction, nrow = ncol(filtered_predictors), ncol = nrow(filtered_predictors))
+    prediction_matrix<- t(prediction_matrix)
+    
+    prediction_raster <- raster(prediction_matrix, xmn = extent(filtered_predictors)[1], xmx = extent(filtered_predictors)[2],
+                                ymn = extent(filtered_predictors)[3], ymx = extent(filtered_predictors)[4],
+                                crs = projection(filtered_predictors))
+    
+    # Lets save prediction raster as a file
+    prediction_file <- file.path(folder_a, paste0("prediction_", n, ".tif")) 
+    writeRaster(prediction_raster, filename = prediction_file, format = "GTiff", overwrite=TRUE)
+    
+    plot_file <- file.path(folder_b, paste0("plot_", n, ".pdf"))  # Save in folder B
+    
+    pdf(plot_file)
+
+    cat("Plot -->",n, "\n")
+    
+    # AUC
+    predictions <- predict(GAM_model, newdata = SDM_data[names(predictor_names)], type = "response")
+    observed <- SDM_data$presence 
+    roc_result <- roc(observed, predictions)
+    auc_value <- auc(roc_result)
+
+    # TSS
+    predicted_classes <- ifelse(predictions > 0.5, 1, 0)
+    conf_matrix <- table(Predicted = predicted_classes, Actual = observed)
+    conf_matrix <- addmargins(conf_matrix)
+    safe_access <- function(mat, row, col) {
+      if(row <= nrow(mat) && col <= ncol(mat)) {
+        return(mat[row, col])
+      } else {
+        return(0)  # Return 0 if the index is out of bounds
+      }
+    }
+    TN <- safe_access(conf_matrix, 1, 1)
+    FP <- safe_access(conf_matrix, 1, 2)
+    FN <- safe_access(conf_matrix, 2, 1)
+    TP <- safe_access(conf_matrix, 2, 2)
+    sensitivity <- if(TP + FN > 0) TP / (TP + FN) else 0
+    specificity <- if(TN + FP > 0) TN / (TN + FP) else 0
+    TSS <- sensitivity + specificity - 1
+    
+    # Boyce-index
+    boyce_data <- data.frame(observed = observed, pred = predictions)
+    boyce_data$observed <- as.numeric(boyce_data$observed)
+    boyce_index <- ecospat::ecospat.boyce(boyce_data$pred, boyce_data$observed, nclass=0)
+    
+    AUC_df <- rbind(AUC_df, data.frame(species = n, auc = auc_value, tss= TSS, boyce= as.numeric(boyce_index["cor"])))
+
+    cat(counter, "/", length(to_process),  "\n")
+    counter<- counter+1 
+    dev.off()
+  }
+  
+
+  
+  
+  
+############  MAXENT MODELS ---------
+   
+install.packages("maxnet")
+library(maxnet)
+
+env <- read_xlsx("ID_predictors.xlsx")
+invacost <- read_xlsx("Species_ID.xlsx")
+
+
+# GBIF data:
+setwd("C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost/Species_from_GBIF/Species_GBIF")
+files<- list.files(pattern= ".xlsx")
+
+all_GBIF <- data.frame()
+
+for( i in files){
+  occurrence_data<- read_xlsx(i)
+  cols_need <- c("species","decimalLongitude", "decimalLatitude")
+  occurrence_data1 <- occurrence_data[, cols_need]
+  
+  missing_columns <- setdiff(cols_need, names(occurrence_data1))
+  for (col in missing_columns) {
+    occurrence_data1[, (col) := NA]  
+  }
+  all_GBIF <- rbind(all_GBIF, occurrence_data1)
+cat(i)
+}
+
+all_GBIF <- all_GBIF %>% filter(species %in% unique(invacost$species ) )
+unique(all_GBIF$species)  
+
+spn <- unique(all_GBIF$species) 
+n <- spn[1]
+  
+AUC_df <- data.frame(species = character(), auc = numeric(),tss = numeric(),
+                       boyce= numeric(), stringsAsFactors = FALSE)
+  
+#Folders directory
+  folder_a <- "Raster_model_Maxent"  # Folder to save raster files
+  folder_b <- "PDF_plot_Maxent"  # Folder to save plot PDFs
+  
+# Create the folders if they don't exist
+  dir.create(folder_a, showWarnings = FALSE)
+  dir.create(folder_b, showWarnings = FALSE)
+  
+  
+  #predictors <- c("bioclim.bio2","bioclim.bio3", "bioclim.bio8","bioclim.bio9","bioclim.bio13","bioclim.bio14","bioclim.bio15","bioclim.bio18","bioclim.bio19", "Elevation", "Slope","Roads")
+  names(predictors) <- c("bioclim.bio2","bioclim.bio3", "bioclim.bio8","bioclim.bio9","bioclim.bio13","bioclim.bio14","bioclim.bio15","bioclim.bio18","bioclim.bio19", "Elevation", "Slope","Cities","Rugosity", "Roads1")
+  
+  folder_path <- setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/PDF_plot")  # Replace with the path to your folder
+  file_names <- list.files(folder_path)
+  species_names <- gsub("^plot_|\\.pdf$", "", file_names)
+  species_names
+  
+  processed_species <- species_names  
+  to_process <- setdiff(spn, processed_species) 
+  
+  # maxENT -
+  
+  counter <- 1
+  for (n in spn) {
+    setwd("C:/Users/Propietario/Desktop/Escritorio/Brian")
+    sp1<- all_GBIF[all_GBIF$species == n,]
+    sp1$presence <- 1
+    
+    if (nrow(sp1) < 10) {
+      next  
+    }
+    
+    occ<- sp1[,-c(1,4)]
+    ##try 3.0:
+    me <- maxent(predictors, as.data.frame(occ), args=c('hinge=false', 'threshold=false', 'quadratic=true'))
+    #occ_file <- system.file('ex/bradypus.csv', package='dismo')
+    #occ <- read.table(occ_file, header=TRUE, sep=',')[,-1]
+    
+    prediction <- project(me, predictors)
+
+    # Lets save prediction raster as a file
+    prediction_file <- file.path(folder_a, paste0("prediction_", n, ".tif")) 
+    writeRaster(prediction$prediction_logistic, filename = prediction_file, format = "GTiff", overwrite=TRUE)
+    
+    plot_file <- file.path(folder_b, paste0("plot_", n, ".pdf"))  # Save in folder B
+    pdf(plot_file)
+    plot(prediction$prediction_logistic)
+    dev.off()
+    
+    cat("Plot -->",n, "\n")
+
+    # AUC
+ page <- me@path
+ page_path <- gsub("\\\\", "/", page)
+ setwd(page_path)
+ 
+ html_content <- read_html("maxent.html") %>% html_text()
+ auc_text <- str_extract(html_content, "(?<=AUC is )\\d+\\.\\d+")
+ 
+    
+ # TSS
+ #list.files()
+ #file_pat <- "C:/Users/PROPIE~1/AppData/Local/Temp/RtmpeywEAg/raster/maxent/310596710859/absence"  # Replace with the actual path to the file
+ #absences <- readLines(file_pat)
+ #data_string <- paste(absences, collapse = "\n")
+ 
+ # Read the data using read.csv
+ #absences_df <- read.csv(text = data_string, header = TRUE, stringsAsFactors = FALSE)
+ #  predicted_classes <- ifelse(predictions > 0.5, 1, 0)
+ # conf_matrix <- table(Predicted = predicted_classes, Actual = observed)
+ # conf_matrix <- addmargins(conf_matrix)
+ # safe_access <- function(mat, row, col) {
+ #  if(row <= nrow(mat) && col <= ncol(mat)) {
+ #    return(mat[row, col])
+ #   } else {
+ #     return(0)  # Return 0 if the index is out of bounds
+ #   }
+ # }
+ # TN <- safe_access(conf_matrix, 1, 1)
+ # FP <- safe_access(conf_matrix, 1, 2)
+ # FN <- safe_access(conf_matrix, 2, 1)
+ #TP <- safe_access(conf_matrix, 2, 2)
+ # sensitivity <- if(TP + FN > 0) TP / (TP + FN) else 0
+ # specificity <- if(TN + FP > 0) TN / (TN + FP) else 0
+ # TSS <- sensitivity + specificity - 1
+    
+    # Boyce-index
+ # boyce_data <- data.frame(observed = observed, pred = predictions)
+ #  boyce_data$observed <- as.numeric(boyce_data$observed)
+ #  boyce_index <- ecospat::ecospat.boyce(boyce_data$pred, boyce_data$observed, nclass=0)
+    
+    AUC_df <- rbind(AUC_df, data.frame(species = n, auc = auc_text, tss= 0, boyce= 1 ))
+    
+  cat(counter, "/", length(spn),  "\n")
+ counter<- counter+1 
+
+  }
+  
+  
+
+########   Ensemble model GAM + MaxENT    -----------------
+  folder_a <- "Raster_model_Ensemble"  # Folder to save raster files
+  folder_b <- "PDF_plot_Ensemble"  # Folder to save plot PDFs
+  
+  # Create the folders if they don't exist
+  dir.create(folder_a, showWarnings = FALSE)
+  dir.create(folder_b, showWarnings = FALSE)
+  
+  # AUC
+  setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/")
+  GAM_auc <- read_xlsx("new_AUC_TSS.xlsx")
+  Max_auc <- read_xlsx("MaxENT_AUC.xlsx")
+  
+  ## GAMs  models
+  getwd()
+  setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Raster_model_gam/")
+  species <- list.files()
+  
+  ## MaxENT  models
+  getwd()
+  setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Raster_model_Maxent/")
+  
+  grid <- extent(-180, 179, -56, 84)  
+  counter <- 1
+  for(i in species){
+    # GAMs
+    setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Raster_model_gam/")
+    gam <- raster(i)
+    gam <- crop(gam, grid)
+    
+    ## MaxENT  models
+    setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Raster_model_Maxent/")
+    maxent <- raster(i)
+    maxent <- crop(maxent, grid)
+    
+    species_name <- gsub("prediction_(.*)\\.tif", "\\1", i)
+    GAM_auc1 <- GAM_auc[species==i,]$auc
+    Max_auc1 <- Max_auc[species==i,]$auc
+    
+    # weight
+    total = as.numeric(GAM_auc1) + as.numeric(Max_auc1)
+    w1 <- as.numeric(GAM_auc1) / total
+    w2 <- as.numeric(Max_auc1)  / total
+    
+    ensemble_sdm <- (gam * w1 + maxent * w2) / (w1 + w2)
+
+    setwd("C:/Users/Propietario/Desktop/Escritorio/Brian")
+    
+    prediction_file <- file.path(folder_a, paste0("prediction_", i, ".tif")) 
+    writeRaster(ensemble_sdm, filename = prediction_file, format = "GTiff", overwrite=TRUE)
+    
+    plot_file <- file.path(folder_b, paste0("plot_", i, ".pdf"))  # Save in folder B
+    pdf(plot_file)
+    plot(ensemble_sdm)
+    dev.off()
+    
+    cat(counter, "/", length(species), "/n")
+    counter=  counter +1 
+    }
+  
+  
+  
+  
+  ## Extract suitability  ----------
+  
+  # res database
+  setwd("C:/Users/Propietario/Desktop/Escritorio/Brian/Brian code 2.0/")
+  inva <- read_xlsx("eu.df2.xlsx", sheet = "Sheet1")
+  unique(inva$Species)
+  inva$Species[inva$Species =="Neovison vison"] <- "Mustela vison"
+  inva$Species[inva$Species =="Eichhornia crassipes"] <- "Pontederia crassipes"
+  
+  # where the species are
+  setwd("C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost")
+  elza <- read_xlsx("Elza_database.xlsx")
+  elza <- elza[!duplicated(elza[c("Taxon","Country")]), ]
+  elza <- elza[,c(1,2)]
+  elza$Taxon[elza$Taxon =="Eichhornia crassipes"] <- "Pontederia crassipes"
+  elza$Taxon[elza$Taxon =="Neovison vison"] <- "Mustela vison"
+  
+  unique(elza$Taxon)
+  elza1 <- elza %>% filter(Taxon %in% unique(inva$Species))
+  unique(elza1$Taxon)
+  
+  full_database <- rbind(elza, inva)
+  
+  setdiff(inva$Species, elza1$Taxon)
+  
+  
+  # Costs 
+  setwd("C:/Users/Propietario/Desktop/Escritorio/SDM_Invacost/New_results/")
+  extra <- read_xlsx("df_extrapolation1_version4.0.xlsx")
+  extra <- extra[,c(2,3)]
+  colnames(elza1) <- colnames(extra)
+  extra$species[extra$species =="Neovison vison"] <- "Mustela vison"
+  extra$species[extra$species =="Eichhornia crassipes"] <- "Pontederia crassipes"
+  
+  setdiff(elza1$species, extra$species )
+  
+  
+  full_database <- rbind(extra, elza1)
+  full_database <- full_database[!duplicated(full_database[c("species","country")]), ]
+  
+  world <- st_read(dsn = "C:/Users/Propietario/Downloads/World_Countries_(Generalized)_-573431906301700955 (1)/World_Countries_Generalized.shp")
+  world <- world[,c(1,3,4,5)]
+  unique(world$COUNTRYAFF)  # 251
+  
+  setdiff(full_database$country, world$COUNTRY) 
+  
+  world$COUNTRY[world$COUNTRY== "United States"] <- "United States of America"
+  world$COUNTRY[world$COUNTRY== "South Sudan"] <- "Sudan"
+  world$COUNTRY[world$COUNTRY== "Svalbard"] <- "Norway"
+  
+  full_database$country[full_database$country== "Democratic Republic of the Congo"] <- "Congo DRC"
+  full_database$country[full_database$country== "United Republic of Tanzania"] <- "Tanzania"
+  full_database$country[full_database$country== "Cape Verde"] <- "Cabo Verde"
+  full_database$country[full_database$country== "Cape verde"] <- "Cabo Verde"
+  full_database$country[full_database$country== "Syrian Arab Republic"] <- "Syria"
+  full_database$country[full_database$country== "Micronesia, Federated States of"] <- "Micronesia"
+  full_database$country[full_database$country== "Macedonia"] <- "North Macedonia"
+  full_database$country[full_database$country== "Russia"] <- "Russian Federation"
+  full_database$country[full_database$country== "United Kingdom of Great Britain and Northern Ireland"] <- "United Kingdom"
+  full_database$country[full_database$country== "Turkey"] <- "Turkiye"
+  full_database$country[full_database$country== "Tanzania, United Republic of"] <- "Tanzania"
+  full_database$country[full_database$country== "Viet Nam"] <- "Vietnam"
+  full_database$country[full_database$country== "Korea, Republic of"] <- "South Korea"
+  full_database$country[full_database$country== "Iran, Islamic Republic of"] <- "Iran"
+  full_database$country[full_database$country== "Corsica"] <- "Italy"
+  full_database$country[full_database$country== "Sardinia"] <- "Italy"
+  full_database$country[full_database$country== "Galapagos"] <- "Ecuador"
+  full_database$country[full_database$country== "Lao People's Democratic Republic"] <- "Laos"
+  full_database$country[full_database$country== "Venezuela, Bolivarian Republic of"] <- "Venezuela"
+  full_database$country[full_database$country== "Sicily"] <- "Italy"
+  full_database$country[full_database$country== "Korea, Democratic People's Republic of"] <- "North Korea"
+  full_database$country[full_database$country== "Palestine, State of"] <- "Palestinian Territory"
+  full_database$country[full_database$country== "Alaska"] <- "United States of America"
+  full_database$country[full_database$country== "Holy See"] <- "Vatican City"
+  full_database$country[full_database$country== "Balearic Islands"] <- "Spain"
+  full_database$country[full_database$country== "Canary Islands"] <- "Spain"
+  full_database$country[full_database$country== "Moldova, Republic of"] <- "Moldova"
+  full_database$country[full_database$country== "Tasmania"] <- "Australia"
+  full_database$country[full_database$country== "Åland Islands"] <- "Finland"
+  full_database$country[full_database$country== "Svalbard and Jan Mayen"] <- "Norway"
+  full_database$country[full_database$country== "USA Coastal States"] <- "United States of America"
+  
+  full_database <- full_database %>% filter(!country %in% c("Taiwan","Hong Kong","Macao","Western Sahara"))
+  
+  setdiff(world$COUNTRY,full_database$country) 
+  
+  world$COUNTRY[world$COUNTRY== "South Sudan"] <- "Sudan"
+  full_database$species[full_database$species== "Tuta absoluta"] <- "Phthorimaea absoluta"
+  
+  
+  combined_results <- data.frame()
+  spn <- unique(full_database$species)
+  n <- spn[1]
+  counter <- 1
+  for (n in spn) {
+    species_data <- full_database[full_database$species == n, ]
+    countries <- unique(species_data$country)
+    
+    raster_file <- paste0("prediction_prediction_", n, ".tif.tif")
+    raster_path <- file.path("C:/Users/Propietario/Desktop/Escritorio/Brian/Revision_results/Raster_model_Ensemble/", raster_file)
+    
+    if (file.exists(raster_path)) {
+      prediction_raster <- raster(raster_path)
+      raster <- raster(extent(prediction_raster), res = 0.08333333)
+      
+      for (country in countries) {
+        species_country <- species_data[species_data$country == country, ]
+        
+        world1 <- world %>% filter(COUNTRY == country)
+        
+        if (nrow(world1) > 0) {
+          crs(raster) <- CRS("+init=epsg:4326")
+          world1 <- st_transform(world1, crs=crs(raster))
+
+          world1$COUNTRY <- as.factor(world1$COUNTRY)
+          rasterized <- rasterize(world1, raster, field = "COUNTRY")
+          
+          country_values <- getValues(rasterized)
+          
+          prediction_raster$new_column <- country_values
+          
+          mask <- prediction_raster[[2]] == 1
+          filtered_values <- prediction_raster[[1]][mask]
+          
+          if (length(filtered_values) > 0) {
+            suitability <- data.frame(suitability = sum(filtered_values, na.rm =T))
+            suitability$country <- country
+            suitability$species <- n
+            colnames(suitability)[1] <- "suitability"
+            
+            combined_results <- bind_rows(combined_results, suitability)
+           
+          }
+        }
+      }
+    }
+    cat(n, "\n")
+    cat(counter, "/", length(spn), "\n")
+    counter <- counter +1
+  }
+  
+write_xlsx(combined_results, "suitability.xlsx")
+
+combined_results <- combined_results %>% filter(!country %in% c("Kiribati"))
+unique(combined_results$species)
+
+
