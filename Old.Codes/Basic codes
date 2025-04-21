@@ -1,0 +1,1064 @@
+### Final code:
+
+## INDEX:
+#INVACOST DATA --> Line 41
+#BACKGROUND DATA --> Line 141
+#GAM MODELS --> Line 204
+# EXTRACTION  SUITABILITY  --> Line 394
+#COMBINE DATASET WITH MACROSCALARS + time since invasion --> Line 538
+#USE OF SCALARS --> INTERPOLATION  --> Line 626
+
+suppressMessages({
+  library(dplyr, quiet = TRUE, warn.conflicts = FALSE)
+  library(reshape, quiet = TRUE, warn.conflicts = FALSE)
+  library(ggplot2)
+  library(tidyr)  
+  library(stringr)
+  library(invacost)
+  library(biomod2)
+  library(ggplot2)
+  library(rgbif)
+  library(gridExtra)
+  library(raster)
+  library(fasterize)
+  library(sf)
+  library(rasterVis)
+  library(sp)
+  library(mgcv)
+  library(caret)
+  library(pROC)
+  library(xlsx)
+  library(readxl)
+  library(writexl)
+  library(rgdal)
+  library(devtools)
+  Sys.setenv(LANGUAGE = "en")
+})
+
+
+##########################################################################################
+#                                    INVACOST DATA
+##########################################################################################
+
+#Get InvaCost
+invacost<- invacost::getInvaCostVersion(version = "4.1")
+
+
+### Cleaning steps
+# Eliminating data with no information on starting and ending years
+invacost <- invacost[-which(is.na(invacost$Probable_starting_year_adjusted)), ]
+invacost <- invacost[-which(is.na(invacost$Probable_ending_year_adjusted)), ]
+
+# Eliminating data with no usable cost value
+invacost <- invacost[-which(is.na(invacost$Cost_estimate_per_year_2017_USD_exchange_rate)), ]
+
+
+#Remove not usseful species records:
+invacost<-invacost[!grepl("/", invacost$Species),]
+invacost<-invacost[!grepl("sp.", invacost$Species),]
+invacost<-invacost[!grepl("spp.", invacost$Species),]
+
+
+unique(invacost$Species) # 811 species
+
+table(invacost$Environment_IAS)
+table(invacost$Kingdom)
+table(invacost$Species) #records per species
+
+unique(invacost$Official_country)
+table(invacost$Geographic_region)
+
+#### Filter out microorganism
+micro <- c("Bacteria","Chromista","Ortharnavirae","Ortharnavirae","Orthornavirae",
+           "Diverse/Unspecified","Viruses","Fungi")
+
+invacost <- invacost %>% filter(!Kingdom %in% micro)
+table(invacost$Kingdom)
+
+unique(invacost$Species) ### 734 
+
+
+##### Remove Marine species
+marine <- c("Amphibalanus improvisus","Magallana gigas","Mnemiopsis leidyi","Prymnesium polylepis",
+            "Prymnesium polylepis","Caulerpa taxifolia","Callinectes sapidus","Undaria pinnatifida",
+            "Limnoperna fortunei","Pterois volitans","Lagocephalus sceleratus","Red tide","Styela clava",
+            "Sargassum muticum","Portunus pelagicus","Ascophyllum nodosum","Didemnum vexillum",
+            "Crepidula porcellana","Rhopilema nomadica","Ciona intestinalis","Codium fragile",
+            "Paralithodes camtschaticus","Carcinus maenas","Pseudochattonella verruculosa",
+            "Teredo navalis","Cercopagis pengoi","Zostera japonica","Sabella spallanzanii",
+            "Elodea canadensis","Mytilopsis sallei", "Eriocheir sinensis")
+
+
+invacost <- invacost %>% filter(!Species %in% marine)
+
+unique(invacost$Species) ### 711 
+
+
+
+###### Apply reliability filters to InvaCost:
+
+invacost<- invacost %>% filter(Implementation=="Observed") %>% filter(Method_reliability =="High")
+
+unique(invacost$Species) ### 553 
+
+
+
+### Country vs site scale 
+
+unique(invacost$Spatial_scale)
+
+scale <- c("Country", "Site")
+
+invacost<- invacost %>% filter(Spatial_scale %in% scale)
+
+Species_scale <- invacost %>% group_by(Species, Spatial_scale) %>% summarise(N_sp = n()) %>% 
+  group_by(Spatial_scale) %>% summarise(N_sp = n()) #204 species vs. 403
+
+invacost<- invacost %>% filter(Spatial_scale =="Country")
+
+unique(invacost$Species) # 204 Species
+
+error_species <- c("Scirtothrips perseae","Bactrocera philippinensis","Culicoides imicola", 
+                   "Teia anartoides","Prostephanus truncatus")  #Not coordinates...
+
+
+invacost<- invacost %>% filter(!Species %in% error_species)
+invacost<- invacost %>% filter(!Species == "Thaumetopoea processionea") #diverse country
+
+species_less_10_grids<-c("Neovison vison", "Bursaphelenchus mucronatus", "Halotydeus destructor", "Anthonomus grandis", "Rhipicephalus microplus", "Cochliomyia hominivorax", "Phenacoccus solenopsis", "Pectinophora gossypiella", "Liriomyza sativae", "Trogoderma granarium", "Listronotus bonariensis", "Maconellicoccus hirsutus", "Eichhornia crassipes", "Acacia nilotica", "Raoiella indica", "Anopheles darlingi", "Anastrepha fraterculus", "Varroa jacobsoni", "Nilaparvata lugens", "Eupatorium adenophorum", "Rastrococcus invadens", "Aleurodicus rugioperculatus", "Thrips palmi", "Tuta absoluta", "Liriomyza huidobrensis", "Paracoccus marginatus", "Gyrodactylus salaris", "Chilo partellus", "Plectranthus parviflorus", "Globodera rostochiensis", "Hypothenemus hampei", "Heracleum sosnowskyi", "Coptotermes gestroi")
+  
+invacost<- invacost %>% filter(!Species %in% species_less_10_grids)
+unique(invacost$Species) # 165 Species
+
+invacost<- invacost %>% filter(!Species == "Varroa destructor") #Miss clasified sp (acari)
+unique(invacost$Species) # 164 Species
+
+
+
+
+##########################################################################################
+#                                    BACKGROUND DATA
+##########################################################################################
+
+
+
+##Lets read now the file:
+GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_all_density_06-2022.tif"
+GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_amphibians_density_06-2022.tif"
+GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_arthropods_density_06-2022.tif"
+GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_mammals_density_06-2022.tif"
+GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_plants_density_06-2022.tif"
+GBIF <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/gbif_reptiles_density_06-2022.tif"
+
+bio <- raster::getData('worldclim', var='bio', res=5)
+
+GBIF <- raster(GBIF)
+
+GBIF <- projectRaster(GBIF, bio, method = "bilinear")#adjust the resolution of the GBIF layer
+GBIF
+
+grid_extent <- extent(-180, 179, -56, 84)
+
+bioclim_variable <- bio[[3]]
+water_mask <- bioclim_variable > 0  
+bioclim_variable <- crop(bioclim_variable, grid_extent)
+
+GBIF <- crop(GBIF, grid_extent)
+GBIF <- mask(GBIF, bioclim_variable)
+
+##
+library(raster)
+library(spatstat)
+library(dismo)
+library(ks)
+points <- rasterToPoints(GBIF)
+
+coords <- cbind(points[,1], points[,2])
+
+scale <- length(points[,3]) / sum(points[,3])
+scaled_count  <- points[,3] * scale
+
+coords <- cbind(points[,1], points[,2])
+
+# Do a 2d kernel density estimation.
+target_density <- kde(coords, w=scaled_count)
+
+target_raster <- raster(target_density)
+
+
+# Clip data to the same resolution/extent.
+target_raster <- resample(target_raster, bio, method='bilinear')
+target_raster <- crop(target_raster, grid_extent)
+#target_raster <- target_raster - minValue(target_raster)
+#target_raster <- raster.transformation(target_raster, trans="norm")
+
+#plot(target_raster)
+background_points <- randomPoints(mask =target_raster, n = 10000, prob = TRUE)
+background_points<- background_points %>% as.data.frame()
+
+
+
+
+##########################################################################################
+#                                    GAM MODELS
+##########################################################################################
+
+
+env <- read_xlsx("ID_predictors.xlsx")
+
+background1 <- read_xlsx("bg_cells_all.xlsx")
+background2 <- read_xlsx("bg_cells_amph.xlsx")
+background3 <- read_xlsx("bg_cells_arth.xlsx")
+background4 <- read_xlsx("bg_cells_mammals.xlsx")
+background5 <- read_xlsx("bg_cells_plants.xlsx")
+background6 <- read_xlsx("bg_cells_reptiles.xlsx")
+
+predictors_bg <- read_xlsx("predictors_bg.xlsx")
+
+
+spn <- unique(invacost$Species)
+n <- spn[1]
+
+#We will need this to proyect the results
+world_extent <- extent(-180, 179, -56, 84)
+prediction_raster <- raster(world_extent, resolution = 0.08333333)
+grid_extent <- extent(-180, 179, -56, 84)
+
+#To apply the mask
+bio <- raster::getData('worldclim', var='bio', res=5)
+#Note: bioc is in collinearity script
+
+#AUC - not for now
+AUC_df <- data.frame(species = character(), auc = numeric(), stringsAsFactors = FALSE)
+
+#Folders directory
+folder_a <- "Raster_model"  # Folder to save raster files
+folder_b <- "PDF_plot"  # Folder to save plot PDFs
+
+# Create the folders if they don't exist
+dir.create(folder_a, showWarnings = FALSE)
+dir.create(folder_b, showWarnings = FALSE)
+
+
+predictors <- c("bioclim.bio2","bioclim.bio3", "bioclim.bio8","bioclim.bio9","bioclim.bio13","bioclim.bio14","bioclim.bio15","bioclim.bio18","bioclim.bio19", "Elevation", "Slope","Roads")
+names(bioc) <- c("bioclim.bio2","bioclim.bio3", "bioclim.bio8","bioclim.bio9","bioclim.bio13","bioclim.bio14","bioclim.bio15","bioclim.bio18","bioclim.bio19", "Elevation", "Slope","Roads")
+
+
+#----
+folder_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/PDF_plot"  # Replace with the path to your folder
+file_names <- list.files(folder_path)
+species_names <- gsub("^plot_|\\.pdf$", "", file_names)
+species_names
+
+
+for (n in spn) {
+  sp1<- invacost[invacost$species == n,]
+  sp1$presence <- 1
+  
+  if (nrow(sp1) < 10) {
+    next  
+  }
+  
+  #Species data + env data
+  sp1_env <- right_join(env,sp1, by= "cell.id")  
+  
+  #Background data + env data
+  if ("Plants" %in% unique(sp1$Order)) {
+    data <- right_join(predictors_bg, background5, by="cell.id")  # bg PLANTS
+    
+  } else if ("Arthropods" %in% unique(sp1$Order)) {
+    data <- right_join(predictors_bg, background3, by="cell.id")  # bg Arthropods
+    
+  } else if ("All_density" %in% unique(sp1$Order)) {
+    data <- right_join(predictors_bg, background1, by="cell.id")  # bg All_density
+    
+  } else if ("Reptilia" %in% unique(sp1$Order)) {
+    data <- right_join(predictors_bg, background6, by="cell.id")  # bg Reptilia
+    
+  } else if ("Mammalia" %in% unique(sp1$Order)) {
+    data <- right_join(predictors_bg, background4, by="cell.id")  # bg Mammalia
+    
+  } else if ("Amphibia" %in% unique(sp1$Order)) {
+    data <- right_join(predictors_bg, background2, by="cell.id")  # bg Amphibia
+  }
+  
+  
+  SDM_data<- bind_rows(sp1_env,data) # presence + bg
+  
+  SDM_data$presence <- ifelse(is.na(SDM_data$presence), 0, SDM_data$presence)
+  
+  #Additional step to retain full variables with predictors in case is needed:
+  SDM_data <- SDM_data[complete.cases(SDM_data$bioclim.bio1), ]
+  
+  SDM_data$presence <- as.factor(SDM_data$presence)
+  
+  #Split in train and evalutaion --> Not for now
+  #indices <- sample(nrow(SDM_data))
+  #n_train <- round(0.7 * nrow(SDM_data))
+  
+  #train_data <- SDM_data[indices[1:n_train], ]
+  #val_data <- SDM_data[indices[(n_train+1):nrow(SDM_data)], ]
+  
+  
+  #Start modelling
+  response<- SDM_data$presence
+  predictors <- c("bioclim.bio2","bioclim.bio3", "bioclim.bio8","bioclim.bio9","bioclim.bio13","bioclim.bio14","bioclim.bio15","bioclim.bio18","bioclim.bio19", "Elevation", "Slope","Roads")
+  formula <- as.formula(paste("presence ~", paste0("s(", predictors, ", k = 5)", collapse = "+")))
+  
+  GAM_model <- gam(formula, data = SDM_data, family = binomial, select = TRUE)
+  
+  #  #Check concurvity:
+    concurvity_threshold <- 0.8
+  worst_concurvity <- 1 
+  predictor_to_remove <- NULL  
+  
+    while (worst_concurvity >= concurvity_threshold) {
+      predictors <- attr(terms(GAM_model), "term.labels")
+      worst_concurvity <- 0
+      
+      for (predictor in predictors) {
+        
+       formula_temp <- update(formula, . ~ . - eval(parse(text = predictor)))
+       GAM_model_temp <- gam(formula_temp, data = SDM_data, family = binomial, select = TRUE)
+       
+       resampled_data <- SDM_data
+        resampled_data$presence <- sample(resampled_data$presence)
+       
+       # Fit the GAM model with the resampled data
+       GAM_model_resampled <- gam(formula_temp, data = resampled_data, family = binomial, select = TRUE)
+       
+    
+       concurvity_value <- concurvity(GAM_model_temp) - concurvity(GAM_model_resampled)
+       worst_concurvity <- max(worst_concurvity, concurvity_value)
+      
+       if (worst_concurvity >= concurvity_threshold) {
+        predictor_to_remove <- predictor
+       }
+     }
+    
+    if (!is.null(predictor_to_remove)) {
+      
+      formula <- update(formula, . ~ . - eval(parse(text = predictor_to_remove)))
+       GAM_model <- gam(formula, data = train_data, family = binomial, select = TRUE)
+    }
+   }
+  
+  gc()
+  
+  cat("GAM model -->",n, ":\n")
+  
+  
+  prediction <- predict(GAM_model, newdata = as.data.frame(bioc), type = "response", na.action = "na.pass")
+  #range(prediction, na.rm = T)
+  
+  prediction_matrix <- matrix(prediction, nrow = ncol(bioc), ncol = nrow(bioc))
+  prediction_matrix<- t(prediction_matrix)
+  
+  prediction_raster <- raster(prediction_matrix, xmn = extent(bioc)[1], xmx = extent(bioc)[2],
+                              ymn = extent(bioc)[3], ymx = extent(bioc)[4],
+                              crs = projection(bioc))
+  
+  values(prediction_raster) <- prediction_matrix
+  
+  
+  #validation the model ---------------------------    (Not for now)
+  #pred_probs <- prediction
+  
+  #binary_predictions <- ifelse(predicted_probs > 0.7, 1, 0)
+  
+  #auc<- roc(binary_predictions, pred_probs, na.rm=T)$auc
+  #AUC_df <- rbind(AUC_df, data.frame(species = n, auc = auc))
+  
+  
+  
+  # Lets save prediction raster as a file
+  prediction_file <- file.path(folder_a, paste0("prediction_", n, ".tif")) 
+  writeRaster(prediction_raster, filename = prediction_file, format = "GTiff", overwrite=TRUE)
+  
+  
+  plot_file <- file.path(folder_b, paste0("plot_", n, ".pdf"))  # Save in folder B
+  
+  pdf(plot_file)
+  plot(prediction_raster, main = n)
+  
+  dev.off()
+  gc()
+  cat("Plot -->",n, ":\n")
+}
+
+
+
+
+##########################################################################################
+#                                   EXTRACTION  SUITABILITY 
+##########################################################################################
+
+# First we have to combine Invacost data + Elza data
+invacost1<- invacost %>% group_by(Species, Official_country) %>% 
+  summarise(Cost=sum(Cost_estimate_per_year_2017_USD_exchange_rate))
+
+colnames(invacost1)[2] <- "country"
+colnames(invacost1)[1] <- "species"
+
+invacost1<- invacost1 %>% separate("Link", c("species", "country"), sep = "_")
+
+elza <- read_xlsx("Elza_database.xlsx")
+remove_sp<-c("Eichhornia crassipes","Heracleum pubescens","Mustela vison")
+elza <- elza %>% filter(!Taxon %in% remove_sp)
+
+
+elza <- elza[,c(1,2,6)]
+colnames(elza) <- c("species", "country","Cost")
+
+elza$Cost <- as.double(elza$Cost)
+elza$Cost<- 0
+full_database <- rbind(invacost1, elza)
+
+#for the loop
+spn<- unique(full_database$species)
+spn<- setdiff(spn, c("Thaumetopoea processionea","Varroa destructor"))
+n <- spn[1]
+
+combined_results <- data.frame()  
+
+
+### Its important to know that the name of the countries must match (!!) world vs. invacost11 -----
+full_database <- full_database %>% filter(!country =="Diverse/Unspecified")
+full_database <- full_database %>% filter(!country =="Antarctica")
+full_database <- full_database %>% filter(!country =="Holy See")
+full_database <- full_database %>% filter(!country =="Western Sahara")
+full_database <- full_database %>% filter(!country =="Macao")
+full_database <- full_database %>% filter(!country =="Taiwan")
+full_database <- full_database %>% filter(!country =="Sao Tome and Principe")
+full_database <- full_database %>% filter(!country =="Hong Kong")
+
+
+
+# Read the shapefile
+world <- st_read(dsn = "C:/Users/isma-/Downloads/World_Countries_Generalized.shp")
+world <- world[,c(1,4,5)]
+
+setdiff(full_database$country, world$COUNTRYAFF) # Now perfect :)
+
+world$COUNTRYAFF[world$COUNTRYAFF== "United States"] <- "United States of America"
+world$COUNTRYAFF[world$COUNTRYAFF== "Bolivia, Plurinational State of"] <- "Bolivia"
+world$COUNTRYAFF[world$COUNTRYAFF== "Brunei Darussalam"] <- "Brunei"
+world$COUNTRYAFF[world$COUNTRYAFF== "Timor-Leste"] <- "East Timor"
+world$COUNTRYAFF[world$COUNTRYAFF== "Lao People's Democratic Republic"] <- "Laos"
+world$COUNTRYAFF[world$COUNTRYAFF== "Viet Nam"] <- "Vietnam"
+world$COUNTRYAFF[world$COUNTRYAFF== "North Macedonia"] <- "Macedonia"
+world$COUNTRYAFF[world$COUNTRYAFF== "Moldova, Republic of"] <- "Moldova"
+world$COUNTRYAFF[world$COUNTRYAFF== "Serbia"] <- "Republic of Serbia"
+world$COUNTRYAFF[world$COUNTRYAFF== "Russian Federation"] <- "Russia"
+world$COUNTRYAFF[world$COUNTRYAFF== "Turkiye"] <- "Turkey"
+world$COUNTRYAFF[world$COUNTRYAFF== "Tanzania, United Republic of"] <- "United Republic of Tanzania"
+world$COUNTRYAFF[world$COUNTRYAFF== "Côte d'Ivoire"] <- "Ivory Coast"
+world$COUNTRYAFF[world$COUNTRYAFF== "Congo, The Democratic Republic of the"] <- "Democratic Republic of the Congo"
+world$COUNTRYAFF[world$COUNTRYAFF== "Venezuela, Bolivarian Republic of"] <- "Venezuela"
+world$COUNTRYAFF[world$COUNTRYAFF== "Cabo Verde"] <- "Cape Verde"
+world$COUNTRYAFF[world$COUNTRYAFF== "Iran, Islamic Republic of"] <- "Iran"
+world$COUNTRYAFF[world$COUNTRYAFF== "Korea, Republic of"] <- "South Korea"
+world$COUNTRYAFF[world$COUNTRYAFF== "Puerto Rico"] <- "United States of America"
+world$COUNTRYAFF[world$COUNTRYAFF== "Alaska"] <- "United States of America"
+
+#Some special cases (yes - looks redundant, just to be sure :) ) 
+world$COUNTRYAFF[world$COUNTRYAFF== "Czechia"] <- "Czech Republic"
+full_database$country[full_database$country== "Czechia"] <- "Czech Republic"
+full_database$country[full_database$country== "Timor-Leste"] <- "East Timor"
+full_database$country[full_database$country== "Russian Federation"] <- "Russia"
+full_database$country[full_database$country== "Serbia"] <- "Republic of Serbia"
+full_database$country[full_database$country== "Puerto Rico"] <- "United States of America"
+full_database$country[full_database$country== "Brunei Darussalam"] <- "Brunei"
+full_database$country[full_database$country== "Greenland"] <- "Denmark"
+full_database$country[full_database$country== "Côte d'Ivoire"] <- "Ivory Coast"
+
+unique(full_database$country)
+unique(world$COUNTRYAFF)
+
+
+
+### ----------------------------
+combined_results <- data.frame()
+
+
+for (n in spn) {
+  species_data <- full_database[full_database$species == n, ]
+  countries <- unique(species_data$country)
+  
+  raster_file <- paste0("prediction_", n, ".tif")
+  raster_path <- file.path("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/Raster_model", raster_file)
+  
+  if (file.exists(raster_path)) {
+    prediction_raster <- raster(raster_path)
+    raster <- raster(extent(prediction_raster), res = 0.08333)
+    
+    for (country in countries) {
+      species_country <- species_data[species_data$country == country, ]
+      
+      world1 <- world %>% filter(COUNTRYAFF == country)
+      
+      if (nrow(world1) > 0) {
+        world1$COUNTRYAFF <- as.factor(world1$COUNTRYAFF)
+        rasterized <- rasterize(world1, raster, field = "COUNTRYAFF")
+        
+        country_values <- getValues(rasterized)
+        
+        prediction_raster$new_column <- country_values
+        
+        mask <- prediction_raster[[2]] == 1
+        filtered_values <- prediction_raster[[1]][mask]
+        
+        if (length(filtered_values) > 0) {
+          suitability <- data.frame(suitability = sum(filtered_values, na.rm =T))
+          suitability$country <- country
+          suitability$species <- n
+          colnames(suitability)[1] <- "suitability"
+          
+          combined_results <- bind_rows(combined_results, suitability)
+          cat("*")
+        }
+      }
+    }
+  }
+}
+
+#lets remove those small islands... --> should be done before
+unique(combined_results$country)
+
+islands <- c("Antigua and Barbuda","Samoa","Tonga","Barbados","Fiji","Grenada","Saint Kitts and Nevis",
+            "Saint Lucia","Saint Vincent and the Grenadines","Solomon Islands","Vanuatu","Marshall Islands",
+            "Comoros","Palau")
+
+combined_results<- combined_results %>% filter(!country %in% islands)
+
+
+
+##########################################################################################
+#               COMBINE DATASET WITH MACROSCALARS + time since invasion
+##########################################################################################
+
+elza
+invacost1
+full_database # both datasets
+
+
+agriculture<- read_xls("Agri.xls")
+agriculture <- agriculture[-c(1,2), -c(2:64)]
+agriculture<- agriculture[-1,c(1:2)]
+colnames(agriculture) <- c("country", "agriculture")
+
+#Again... match countries 
+setdiff(full_database$country, agriculture$country) 
+
+full_database$country[full_database$country == "United States of America"] <- "United States"
+full_database$country[full_database$country == "Laos"] <- "Lao PDR"
+full_database$country[full_database$country == "Slovakia"] <- "Slovak Republic"
+full_database$country[full_database$country == "United Republic of Tanzania"] <- "Tanzania"
+full_database$country[full_database$country == "Turkey"] <- "Turkiye"
+full_database$country[full_database$country == "Venezuela"] <- "Venezuela, RB"
+full_database$country[full_database$country == "Iran"] <- "Iran, Islamic Rep."
+full_database$country[full_database$country == "Czech Republic"] <- "Czechia"
+full_database$country[full_database$country == "Democratic Republic of the Congo"] <- "Congo, Dem. Rep."
+full_database$country[full_database$country == "South Korea"] <- "Korea, Rep."
+full_database$country[full_database$country == "Kyrgyzstan"] <- "Kyrgyz Republic"
+full_database$country[full_database$country == "Macedonia"] <- "North Macedonia"
+full_database$country[full_database$country == "Micronesia, Federated States of"] <- "Micronesia, Fed. Sts."
+full_database$country[full_database$country == "Egypt"] <- "Egypt, Arab Rep."
+full_database$country[full_database$country == "Yemen"] <- "Yemen, Rep."
+full_database$country[full_database$country == "Korea, Democratic People's Republic of"] <- "Korea, Dem. People's Rep."
+full_database$country[full_database$country == "Ivory Coast"] <- "Cote d'Ivoire"
+full_database$country[full_database$country == "Brunei"] <- "Brunei Darussalam"
+full_database$country[full_database$country == "East Timor"] <- "Timor-Leste"
+full_database$country[full_database$country == "Russia"] <- "Russian Federation"
+full_database$country[full_database$country == "Republic of Serbia"] <- "Serbia"
+full_database$country[full_database$country == "Gambia"] <- "Gambia, The"
+
+
+full_database<- right_join(full_database, agriculture, by="country")
+colnames(full_database)[4]<- "Agriculture"
+
+
+GDP<- read_xls("GDP.xls")
+GDP <- GDP[-c(1,2), -c(2:64)]
+GDP<- GDP[-1,c(1:2)]
+colnames(GDP) <- c("country", "2020")
+
+setdiff(full_database$country, GDP$country)
+
+
+full_database<- right_join(full_database, GDP, by="country")
+colnames(full_database)[5]<- "GDP"
+
+
+Pop_size<- read_xls("Pop_size.xls")
+Pop_size <- Pop_size[-c(1,2), -c(2:64)]
+Pop_size<- Pop_size[-1,c(1:2)]
+
+colnames(Pop_size) <- c("country", "2020")
+
+setdiff(full_database$country, Pop_size$country)
+
+full_database<- right_join(full_database, Pop_size, by="country")
+colnames(full_database)[6]<- "Pop_size"
+
+#Suitability
+full_database <- full_database %>% unite("Link", c(species,country))
+combined_results<- combined_results %>% unite("Link", c(species,country))
+full_database<- right_join(full_database, combined_results, by="Link")
+
+#Time since invasion
+
+time_since_invasion <- read_xlsx("invacost_first_year.xlsx")
+time_since_invasion<- time_since_invasion[,c(3,4)]
+full_database<- right_join(full_database, time_since_invasion, by="Link")
+
+full_database<- full_database %>% separate("Link", c("species", "country"), sep = "_")
+
+full_database<- full_database %>% filter(!country %in% islands)
+full_database<- full_database %>% filter(species %in% combined_results1$species)
+
+
+
+
+
+
+####################################################################################################
+#                         USE OF SCALARS --> INTERPOLATION 
+####################################################################################################
+
+elza
+invacost1
+full_database<- read_xlsx("full_database.xlsx") # both datasets (I had to fill some manually)
+
+full_database$Pop_size <- gsub(",", "", full_database$Pop_size) %>% as.numeric()
+full_database$GDP <- gsub(",", "", full_database$GDP)%>%as.numeric()
+full_database$Agriculture <- gsub(",", "", full_database$Agriculture)%>%as.numeric()
+
+
+
+#extract bo and b1
+library(MASS)
+full_database$FirstRecord<- as.numeric(full_database$FirstRecord)
+model <- glm.nb(log1p(suitability) ~ FirstRecord, data = full_database)
+summary(model)
+
+# Extract the estimated coefficients
+b0 <- coef(model)[1]  # Intercept (b0) ---> 2.104359
+b1 <- coef(model)[2]  # Coefficient for time (b1) ---> -0.00010
+
+
+full_database <- full_database %>% unite("Link", c(species,country))
+invacost1 <- invacost1 %>% unite("Link", c(species,country))
+invacost33 <- semi_join(invacost1,full_database,  by="Link")
+nrow(invacost33)
+invacost33<- right_join(invacost33, full_database, by="Link")
+invacost33 <- invacost33[!is.na(invacost33$Cost.x), ]
+invacost33 <- invacost33[!duplicated(invacost33$Link), ]
+invacost33<- invacost33[,-c(3,4)]
+colnames(invacost33)[2] <- "Cost"
+invacost33$FirstRecord[is.na(invacost33$FirstRecord)] <- 0
+invacost33<- invacost33 %>% drop_na()
+invacost33<- invacost33 %>% separate("Link", c("species", "country"), sep = "_")
+
+
+elza<- elza %>% filter(!country %in% islands)
+elza<- elza %>% filter(species %in% combined_results1$species)
+elza <- elza %>% unite("Link", c(species,country))
+df_extrapolation1<- semi_join(elza, full_database, by="Link")
+df_extrapolation1<- right_join(df_extrapolation1, full_database, by="Link")
+
+df_extrapolation1 <- df_extrapolation1[!is.na(df_extrapolation1$Cost.x), ]
+df_extrapolation1 <- df_extrapolation1[!duplicated(df_extrapolation1$Link), ]
+df_extrapolation1<- df_extrapolation1[,-c(3,4)]
+colnames(df_extrapolation1)[2] <- "Cost"
+df_extrapolation1$FirstRecord[is.na(df_extrapolation1$FirstRecord)] <- 0
+df_extrapolation1<- df_extrapolation1 %>% drop_na()
+df_extrapolation1<- df_extrapolation1 %>% separate("Link", c("species", "country"), sep = "_")
+nrow(df_extrapolation1)
+  
+  
+# Formulas at the end of the script:  
+result_df <- data.frame()
+spn <- setdiff(unique(invacost33$species), "Acacia nilotica")
+i <- spn[1]
+aic_results <- list()
+pos.pred <- c("GDP", "Pop_size", "Agriculture", "suitability")
+pred.l <- list(m0= NULL, m1= c(pos.pred[1]), m2= c(pos.pred[2]), m3= c(pos.pred[3]), m4= c(pos.pred[4]), m5= pos.pred[c(1,2)], m6= pos.pred[c(1,4)], m7= pos.pred[c(1,3)], 
+               m8= pos.pred[c(4,2)], m9= pos.pred[c(4,3)], m10= pos.pred[c(2,3)], m11= pos.pred[c(1,3,4)], m12= pos.pred[c(1,2,3)], m13= pos.pred[c(1,2,4)],
+               m14= pos.pred[c(2,3,4)], m15= pos.pred) #create all combinations of predictors
+
+
+for (i in spn) {
+  invacost4 <- invacost33[invacost33$species == i, ]
+  country <- unique(invacost4$country)
+  n <- length(country)
+  
+  for (j in 1:length(country)) {
+    invacost5 <- invacost4 %>% filter(country == country[j])
+    observed_costs <- invacost4$Cost
+    mean_cost <- sum(observed_costs) / n
+    
+    df_extrapolation2 <- df_extrapolation1 %>% filter(species == i)
+    country2 <- unique(df_extrapolation2$country)
+    
+    for (k in 1:length(country2)) {
+      df_extrapolation3 <- df_extrapolation2 %>% filter(country == country2[k])
+      
+      if (nrow(df_extrapolation3) > 0) {
+        GDP_ck <- mean(invacost4$GDP)
+        GDP_ck <- gsub(",", "", GDP_ck) %>% as.numeric()
+        
+        pop_size_ck <- mean(invacost4$Pop_size)
+        pop_size_ck <- gsub(",", "", pop_size_ck) %>% as.numeric()
+        
+        agri_area_ck <- mean(invacost4$Agriculture)
+        agri_area_ck <- gsub(",", "", agri_area_ck) %>% as.numeric()
+        
+        GDP_ci <- as.numeric(df_extrapolation3$GDP)
+        pop_size_ci <- as.numeric(df_extrapolation3$Pop_size)
+        agri_area_ci <- as.numeric(df_extrapolation3$Agriculture)
+        
+        #Suitability scalar
+        suitability_ci <- df_extrapolation3$suitability
+        suitability_ck <- mean(invacost4$suitability)
+        
+        colnames(invacost5)[7]<- "suitability"
+        # Add suitability area with the time since invasion
+        if (!is.na(df_extrapolation3$FirstRecord)) {
+          z <- b0 + b1 * suitability_ci
+          A_prime_ci <- suitability_ci / (1 + exp(-z))
+          
+        } else {
+          A_prime_ci <- suitability_ci
+        }
+        
+        if (sum(invacost4$suitability) > 0 ) {
+          z <- b0 + b1 * suitability_ci
+          A_prime_ck <- suitability_ck / (1 + exp(-z))
+          A_prime_ck<- as.numeric(A_prime_ck)
+        } else {
+          A_prime_ck <- suitability_ck
+          A_prime_ck<- as.numeric(A_prime_ck)
+        }
+        
+        
+        log_likelihood <- function(gamma, observed_costs, predictors_ci, predictors_ck, n, predictor_names) {
+          interpolated_cost <- sum(observed_costs, na.rm = TRUE) / n
+          predicted_costs <- interpolated_cost
+          
+          for (i in seq_along(predictor_names)) {
+            ratios <- as.numeric(predictors_ci[[i]]) / (as.numeric(predictors_ck[[i]]) + 1e-8) # added small constant to avoid division by zero
+            predicted_costs <- predicted_costs * prod(ratios^gamma[i], na.rm = TRUE)
+          }
+          
+          deviation <- observed_costs - predicted_costs
+          negative_log_likelihood <- sum(deviation^2, na.rm = TRUE)
+          return(negative_log_likelihood)
+        }
+        
+        
+        for (m in 1:length(pred.l)) {
+          predictors <- pred.l[[m]]  # This will get you each combination of predictors
+          
+          
+          if(length(predictors) == 0) {
+            interpolated_cost <- observed_costs
+            logLik_val <- logLik_constant_model(observed_costs)
+            aic <- -2 * logLik_val  # AIC calculation when predictors are null
+            aic_results[[paste0("m", m)]] <- list(AIC = aic, gamma = NULL) 
+            next
+          }
+          
+          
+          
+          all_predictor_names <- c("GDP", "Pop_size", "Agriculture", "suitability")
+          all_predictors_ci <- list(GDP_ci, pop_size_ci, agri_area_ci, as.numeric(A_prime_ci))
+          all_predictors_ck <- list(GDP_ck, pop_size_ck, agri_area_ck, as.numeric(A_prime_ck)) 
+          
+          # Select only those predictors that are used in the current model iteration
+          predictor_indices <- match(predictors, all_predictor_names)
+          predictor_ci <- all_predictors_ci[predictor_indices]
+          predictor_ck <- all_predictors_ck[predictor_indices]
+          names(predictor_ck) <- predictors
+          names(predictor_ci) <- predictors
+          
+          # Case 1: Set standard deviation to a predefined constant
+          if(length(observed_costs) == 1) {
+            par1 <- c(rep(0.1, length(predictors)), 0.1)  # or another constant of your choice
+          } else {
+            par1 <- c(rep(0.1, length(predictors)), sd(observed_costs, na.rm = TRUE))
+          }
+          names(par1) <- c(predictors, "sd")
+          
+          # Case 2: Don't include standard deviation at all
+          #par1 <- rep(0.1, length(predictors))
+          # Or use optim #
+          if (length(predictors) == 1) {
+            # Single predictor -> use optimize()
+            result <- optimize(
+              f = function(x) log_likelihood(
+                c(predictor = x, sd = 0.1),  # parameter vector: predictor and sd
+                observed_costs = observed_costs, 
+                predictors_ci = predictor_ci,  
+                predictors_ck = predictor_ck,  
+                n = n,
+                predictor_names = predictors
+              ), 
+              interval = c(-1, 1)  # choose suitable bounds for your problem
+            )
+            gamma_optimized <- c(predictor= result$minimum, sd = 0.1)
+            names(gamma_optimized) <- c(predictors,"sd")
+            gamma_optimized <- gamma_optimized[names(gamma_optimized) != "sd"]
+            
+          } else {
+            # Multiple predictors -> use optim()
+            initial_pars <- c(rep(0.1, length(predictors)), 0.1)
+            names(initial_pars) <- c(predictors, "sd")
+            
+            result <- optim(
+              initial_pars, 
+              log_likelihood, 
+              observed_costs = observed_costs, 
+              predictors_ci = predictor_ci,  
+              predictors_ck = predictor_ck,  
+              n = n,
+              predictor_names = predictors
+            )
+            gamma_optimized <- result$par
+            gamma_optimized <- gamma_optimized[names(gamma_optimized) != "sd"]
+          }
+          
+          
+          #gamma_optimized <- result$par[predictors]
+          
+          fit.t1 <- list()
+          for (pred in predictors) {
+            gamma_optimized_pred <- gamma_optimized[pred] # get the corresponding gamma value
+            
+            ratio <- (as.numeric(df_extrapolation3[[pred]]) / mean(invacost4[[pred]])) ^ gamma_optimized_pred
+            fit.t1[[paste0("ratios_", pred)]] <- ratio
+          }
+          
+          fit.t1_values <- sapply(fit.t1, function(x) x)
+          
+          interpolated_cost <- mean(observed_costs) * prod(fit.t1_values)
+          
+          fit <- list(interpolated_cost = interpolated_cost, 
+                      observed_costs = mean(observed_costs))
+          
+          aic <- aic.fit(fit, gamma_optimized)
+          aic_results[[paste0("m", m)]] <- list(AIC = aic, gamma = gamma_optimized)  # Store the AIC and gamma values for each model
+          
+        }
+        
+        # Filter out NULL entries or entries without 'AIC'
+        aic_results_filtered <- Filter(function(x) !is.null(x) && !is.null(x$AIC), aic_results_filtered)
+        
+        # find the model with the lowest AIC
+        min_AIC <- min(sapply(aic_results_filtered, function(x) x$AIC))
+        
+        # filter models that have the minimum AIC
+        min_AIC_models <- aic_results_filtered[sapply(aic_results_filtered, function(x) x$AIC) == min_AIC]
+        
+        # In case of same AIC, select the model with less predictors
+        min_predictors <- min(sapply(min_AIC_models, function(x) length(x$gamma)))
+        best_model <- min_AIC_models[sapply(min_AIC_models, function(x) length(x$gamma)) == min_predictors][[1]]
+        
+        gamma_optimized <- best_model$gamma
+        gamma_optimized <- gamma_optimized[names(gamma_optimized) != "sd"]
+        fit <- list()
+        for (pred in predictors) {
+          gamma_optimized_pred <- gamma_optimized[pred] # get the corresponding gamma value
+          ratio <- (as.numeric(df_extrapolation3[[pred]]) / invacost5[[pred]]) ^ gamma_optimized_pred
+          fit[[paste0("ratios_", pred)]] <- ratio
+        }
+        
+        fit.t1_values <- sapply(fit, function(x) x)
+        if(length(fit.t1) == 0){
+          interpolated_cost <- mean(observed_costs)
+        } else {
+          
+        fit.t1_values <- fit.t1_values[!is.na(fit.t1_values)]
+        fit.t1_values <- fit.t1_values[names(fit.t1_values) != "interpolated_cost"]
+        fit.t1_values <- fit.t1_values[names(fit.t1_values) != "observed_costs"]
+        
+        fit.t1_values <- unlist(fit.t1_values) 
+        interpolated_cost <- mean(observed_costs) * prod(fit.t1_values)
+        }
+        
+        result <- data.frame(Species = i, Country = country2[k], Cost_interpolated = interpolated_cost)
+        
+        # Append the result to the main result dataframe
+        result_df <- rbind(result_df, result)
+      }
+      cat("*")
+    }
+  }
+}
+
+write_xlsx(result_df, "Interpolate_costs.xlsx")
+
+#basic fast plot
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+result_df1<- result_df %>% group_by(Country) %>% summarise(Cost=sum(Cost_interpolated))
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+world_data <- merge(world, result_df1, by.x = "admin", by.y = "Country")
+
+ggplot(data = world_data) +
+  geom_sf(aes(fill = Cost)) +
+  scale_fill_gradient(low = "blue", high = "red") +
+  theme_minimal() +
+  labs(fill = "Cost", title = "Cost by Country") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##############  suitability scalar 
+setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/New_results")
+
+# Suitability scalar
+data<- read_xlsx("full_database2.xlsx")
+head(data)
+data<- data[,c(1:3,7:9)]
+unique(data$Order)
+str(data)
+
+
+data$FirstRecord <- as.numeric(data$FirstRecord)
+data$FirstRecord[is.na(data$FirstRecord)] <- mean(data$FirstRecord, na.rm = TRUE)
+
+coefficients <- data.frame(Order = character(), bo = numeric(), b1 = numeric(), stringsAsFactors = FALSE)
+
+for (ord in unique(data$Order)) {
+
+  data_sub <- subset(data, Order == ord)
+  
+
+  glm_nb <- glm.nb(sqrt(suitability) ~ FirstRecord, data = data_sub)
+  
+  # Extract the coefficients and store them in the data frame
+  bo <- coef(glm_nb)[1] # Intercept
+  b1 <- coef(glm_nb)[2] # FirstRecord coefficient
+  
+  coefficients <- rbind(coefficients, data.frame(Order = ord, bo = bo, b1 = b1))
+}
+
+
+dat <- merge(dat, data[c("species", "Order")], by = "species", all.x = TRUE)
+dat <- dat[!duplicated(dat[c('species', 'country', 'Type_of_cost_merged', 'FirstRecord', 'suitability', 'cost_mil', 'type', 'Order')]), ]
+
+
+A_prime_ck <- numeric(nrow(dat))
+for (i in 1:nrow(dat)) {
+  
+  inva1 <- dat[i, ]
+  ord <- inva1$Order
+  
+  # Filter the coefficients for the current Order
+  coefficients1 <- coefficients %>% filter(Order == ord)
+  
+  if (!is.na(inva1$suitability) && inva1$suitability > 0 ) {
+    z <- coefficients1$bo + coefficients1$b1 * mean(data$suitability[data$Order == ord], na.rm = TRUE)
+    A_prime_ck[i] <- inva1$suitability / (1 + exp(-z))
+    
+  } else {
+    A_prime_ck[i] <- inva1$suitability
+  }
+  
+  
+  cat("*")
+}
+
+# Add the new column to the data
+dat$A_prime_ck <- A_prime_ck
+write_xlsx(dat, "suitability_scalar.xlsx")
+
+
+sp<- read_xlsx("Species_ID.xlsx")
+unique(sp$species)
+sp$species[sp$species == "Pontederia crassipes"] <- "Eichhornia crassipes"
+sp$species[sp$species == "Mustela vison"] <- "Neovison vison"
+sp$species[sp$species == "Phthorimaea absoluta"] <- "Tuta absoluta"
+
+#Open InvaCost database used to build the model
+invacost1 <- invacost %>% group_by(Species, Official_country, Type_of_cost_merged) %>% summarise(
+  Cost= sum(Cost_estimate_per_year_2017_USD_exchange_rate)) %>% drop_na()
+
+invacost1 <- invacost1 %>% filter(!Official_country %in% c("Diverse/Unspecified")) %>% filter(!Species=="Varroa destructor")
+eu.df.full <- invacost1 %>% filter(Species %in% unique(sp$species))
+unique(eu.df.full$Species) #167 
+#Only include data at the country level
+
+eu.df.country <- eu.df.full
+
+# Country only data + combination of species, sector and type of cost ----------------------------------------
+
+comb4 <- paste(eu.df.country$Species, ",", eu.df.country$Type_of_cost_merged) #Add comma so we can easily separate
+print(paste("Number of unique combination when considering species and type of cost:", length(unique(comb4))))
+
+comb.unique4 <- data.frame(comb.unique= unique(comb4)) #need as dataframe to use the function separate
+
+##Convert this vector to a dataframe
+df.comb4 <- separate(comb.unique4, col= "comb.unique", c("Species", "Type_of_cost_merged"), sep=" , ")
+
+# Prepare data for extrapolation from species.csv -------------------------
+
+##Open dataframe containing the presence of invasive species in Europe
+
+sp<- read_xlsx("Elza_database.xlsx")
+unique(sp$Species)
+sp<- sp %>% filter (Taxon %in% unique(invacost33$Species)) # 164
+sp <- sp[,c(1,2,6)]
+colnames(sp) <- c("Species", "country","Cost")
+sp$Cost <- as.double(sp$Cost)
+sp$Cost<- 0
+
+# How many specie are present in both the InvaCost data and the extrapolation df --------
+nb.sp4 <- intersect(df.comb4$Species, sp$Species) ; print(length(unique(nb.sp4))) #Country only data, combination of species, impacted sector and type of cost: 46
+
+
+
+# Build dataframe for extrapolation ---------------------------------------
+sp4 <- sp[sp$Species %in% df.comb4$Species,]
+df.extrapolation4 <- merge(df.comb4, sp4, by= "Species")
+df.extrapolation4 <- df.extrapolation4 %>% unite("Link", c(Species,country))
+invacost33 <- invacost33 %>% unite("Link", c(species,country))
+
+df.extrapolation4<- df.extrapolation4 %>% filter(!Link %in% unique(invacost33$Link))
+unique(df.extrapolation4$Species)
+
+write_xlsx(df.extrapolation4,"df_extrapolation1_version3.0.xlsx")
+
+

@@ -1,0 +1,358 @@
+###############################################################################################################
+
+# First lets start with the layer of all GBIF species data --------------------
+
+install.packages("httr")
+library(httr)
+library(httr)
+library(jsonlite)
+
+api_url <- "https://io.biodiversite-quebec.ca/stac/collections/gbif_heatmaps/items"
+
+response <- GET(api_url)
+
+if (status_code(response) == 200) {
+  data <- content(response, "text", encoding = "UTF-8")
+  data_json <- fromJSON(data, flatten = FALSE)
+  
+  tiff_links <- lapply(data_json$features, function(item) item$links[[length(item$links)]]$href)
+  
+  # In fact, I fuck the code somewhere but I am not sure where, inspecting the data_json can dowload the file
+  for (i in seq_along(tiff_links)) {
+    cat("TIFF link", i, ":", tiff_links[[i]], "\n")
+  }
+download.file(tiff_links[7], "file.tif")
+
+
+GBIF <- "C:/Users/isma-/Downloads/gbif_all_density_06-2022.tif"
+GBIF <- raster(GBIF)
+
+
+setwd("C:/Users/")
+
+# Other predictors -------------------- Note: I have two elevation and two evapotrans
+
+bio
+grid_extent <- extent(-180, 180, -60, 90)  
+
+
+#Elevation
+setwd("C:/Users/isma-/Downloads")
+elevation <- rgdal::readOGR("gmted2010.shp")
+elevation <- crop(elevation, grid_extent) #crop to the dimension of BIOCLIM
+
+elevation_raster <- raster(extent(elevation), resolution = c(0.08333333, 0.08333333)) 
+
+
+###### Evapotranspiration
+#file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Global-AI_ET0_v3_annual/et0_v3_yr.tif"
+
+#Evapotranspiration <- raster(file_path)
+#plot(Evapotranspiration)
+
+#Evapotranspiration <- crop(Evapotranspiration, grid_extent) #crop to the dimension of BIOCLIM
+#Evapotranspiration <- projectRaster(Evapotranspiration, bioc, method = "bilinear") #re-proyect
+
+#plot(Evapotranspiration)
+
+
+
+# Or use CHELSA DATABASE ----
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/CHELSA_pet_penman_mean_1981-2010_V.2.1.tif"
+
+Evapotranspiration <- raster(file_path)
+plot(Evapotranspiration)
+
+Evapotranspiration <- crop(Evapotranspiration, grid_extent) #crop to the dimension of BIOCLIM
+Evapotranspiration <- projectRaster(Evapotranspiration, bioc, method = "bilinear") #re-proyect
+Evapotranspiration <- setNames(Evapotranspiration, "Evapotranspiration")
+plot(Evapotranspiration)
+
+
+
+##### Slope  ##### 
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/slope_1KMmd_GMTEDmd.tif"
+
+Slope <- raster(file_path)
+plot(Slope)
+
+Slope <- crop(Slope, grid_extent) #crop to the dimension of BIOCLIM
+Slope <- projectRaster(Slope, bioc, method = "bilinear") #re-proyect
+Slope <- setNames(Slope, "Slope")
+plot(Slope)
+
+
+##### Elevation ##### 
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/elevation_1KMmd_GMTEDmd.tif"
+
+Elevation <- raster(file_path)
+plot(Elevation)
+
+Elevation <- crop(Elevation, grid_extent) #crop to the dimension of BIOCLIM
+Elevation <- projectRaster(Elevation, bio, method = "bilinear") #re-proyect
+Elevation <- setNames(Elevation, "Elevation")
+plot(Elevation)
+
+
+
+##### Rugosity ##### 
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/roughness_1KMmd_GMTEDmd.tif"
+
+Rugosity <- raster(file_path)
+plot(Rugosity)
+
+Rugosity <- crop(Rugosity, grid_extent) #crop to the dimension of BIOCLIM
+Rugosity <- projectRaster(Rugosity, bio, method = "bilinear") #re-proyect
+Rugosity <- setNames(Rugosity, "Rugosity")
+plot(Rugosity)
+
+
+
+#### Distance to the roads --> https://sedac.ciesin.columbia.edu/data/set/groads-global-roads-open-access-v1
+road_map <- st_read("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/groads-v1-global-gdb/groads-v1-europe-shp/gROADS-v1-europe.shp")
+road_map <- st_read("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/Roads.shp")
+
+
+
+setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road")
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/Final_layer_Roads.tif"
+
+Roads <- raster(file_path)
+
+Roads <- crop(Roads, grid_extent) #crop to the dimension of BIOCLIM
+Roads <- projectRaster(Roads, bio, method = "bilinear") #re-proyect
+Roads <- setNames(Roads, "Roads")
+
+
+
+##### Check collinearity ----------
+
+
+###### Predictors ######
+bio <- raster::getData('worldclim', var='bio', res=5)
+
+#In case we want to drop some layer before
+#remove <- c("bio1","bio2","bio3","bio10")
+#bio <- raster::dropLayer(bio, remove)
+grid_extent <- extent(-180, 179, -56, 84)
+
+
+#resample
+bio_resampled <- resample(bio, bio)
+Elevation_resampled <- resample(Elevation, bio)
+Slope_resampled <- resample(Slope, bio)
+Evapotranspiration_resampled <- resample(Evapotranspiration, bio)
+Rugosity_resampled <- resample(Rugosity, bio)
+Roads <- resample(Roads, bio)
+
+#crops
+Roads <- crop(Roads, grid_extent) 
+Elevation_resampled <- crop(Elevation_resampled, grid_extent) 
+Slope_resampled <- crop(Slope_resampled, grid_extent) 
+Evapotranspiration_resampled <- crop(Evapotranspiration_resampled, grid_extent) 
+Rugosity_resampled <- crop(Rugosity_resampled, grid_extent) 
+bio_resampled <- crop(bio_resampled, grid_extent) 
+
+
+predictors <- stack(bio_resampled, 
+                    Elevation_resampled, 
+                    Slope_resampled,
+                    Evapotranspiration_resampled,
+                    Rugosity_resampled,
+                    Roads) # need to change the name later
+
+
+## correlation
+library(usdm)
+
+v <- vifstep(predictors) 
+vif(predictors) 
+v
+
+
+drop <- c("bio1","bio4","bio5","bio6","bio10","bio11","bio16","bio17")
+bioc <- exclude(predictors,v) #exclude the correlated variables using th = 10.
+
+
+bioc
+
+output_file <- "predictors1.tif"
+
+writeRaster(predictors, filename = output_file, format = "GTiff",overwrite=TRUE )
+
+
+
+
+
+################ Script to place GBIF records in the cells: ------------
+
+gc()
+bio_resampled # as example grid of our predictors
+grid_extent <- extent(-180, 179, -56, 84)  
+
+grid <- raster(grid_extent, res = 0.08333333)
+
+grid_count <- raster(grid)
+
+
+folder_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Species_from_GBIF"  
+
+
+species <- list.files(folder_path, pattern = "\\.xlsx$", full.names = TRUE)
+
+result_df <- data.frame(Species = character(), Ncells = numeric(), stringsAsFactors = FALSE)
+
+for (files in species) { 
+
+  data <- readxl::read_xlsx(files)
+  
+  #data<- data %>% filter(year <2023)
+  
+  occ_points <- sp::SpatialPoints(data.frame(lon = data$decimalLongitude, 
+                                             lat = data$decimalLatitude))
+  
+  grid_count <- rasterize(occ_points, grid_count, fun = "count")
+  
+
+  unique_species <- unique(data$species)
+  
+  freq_table <- freq(grid_count) %>% na.omit() %>% as.data.frame() %>%
+    summarise(Ncells = sum(count))
+  
+  result_df <- result_df %>% 
+    bind_rows(data.frame(Species = unique_species, Ncells = freq_table$Ncells, stringsAsFactors = FALSE))
+  
+cat(files, "==> Done\n")
+
+  }
+
+
+print(result_df)
+
+result_df1<- result_df %>% filter(Ncells < 10)
+
+
+
+### Lets combine the species data with predictors data
+
+file.list <- list.files(pattern='*.xlsx') #171 species
+df.list <- lapply(file.list, read_excel)
+
+df <- do.call(rbind, df.list) #7.8 million records
+
+
+
+# Now our aim here is reduce the redundant information of the predictors. To this lets extract unique cells
+
+occ_points <- sp::SpatialPoints(data.frame(lon = df$decimalLongitude, 
+                                           lat = df$decimalLatitude))
+
+Grid_points <- rasterize(occ_points, grid_count, fun = "count")
+
+cell.ids <- cellFromXY(Grid_points, occ_points)
+cell.ids <- unique(cell.ids) #1.75 million of unique cells
+
+file_path <- "C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Distance_to_road/predictors1.tif"
+predictors <- raster(file_path)
+
+bioclim <- extract(bio_resampled, cell.ids)
+Elevation <- extract(Elevation_resampled, cell.ids)
+Slope <- extract(Slope_resampled, cell.ids)
+Evapotranspiration <- extract(Evapotranspiration_resampled, cell.ids)
+Rugosity <- extract(Rugosity_resampled, cell.ids)
+Roads <- extract(Roads, cell.ids)
+
+
+predictors <- data.frame(cell.id = cell.ids,
+                         bioclim = bioclim,
+                         Elevation = Elevation,
+                         Slope = Slope,
+                         Evapotranspiration = Evapotranspiration,
+                         Rugosity = Rugosity,
+                         Roads = Roads
+                         )
+
+ 
+
+write.csv2(predictors, "ID_predictors.csv")
+write_xlsx(predictors, "ID_predictors.xlsx")
+
+
+# Cool now we need the same but for the species:
+
+spn<- unique(df$species)
+n <- spn[1]
+result_df <- data.frame(species = character(), cell.id = numeric(), stringsAsFactors = FALSE)
+
+for (n in spn) {
+  data <- df[df$species == n, ]
+  data$decimalLongitude <- as.numeric(as.character(data$decimalLongitude))
+  data$decimalLatitude <- as.numeric(as.character(data$decimalLatitude))
+  
+  occ_points <- sp::SpatialPoints(data.frame(lon = data$decimalLongitude, lat = data$decimalLatitude))
+  Grid_points <- rasterize(occ_points, grid_count, fun = "count")
+  cell.ids <- cellFromXY(Grid_points, occ_points)
+  cell.ids <- unique(cell.ids)
+  
+  result_df <- rbind(result_df, data.frame(species = rep(n, length(cell.ids)), cell.id = cell.ids))
+  cat("yatusabes-->", n, ":\n")
+}
+
+unique_species <- unique(result_df$species)
+result_df$species_ID <- match(result_df$species, unique_species)
+result_df<- result_df[,-3]
+write_xlsx(result_df, "Species_ID.xlsx")
+
+
+
+
+
+
+
+
+
+
+{
+aquatic <- c("Aedes aegypti",
+"Aedes camptorhynchus",
+"Alopochen aegyptiaca",
+"Azolla filiculoides",
+"Branta canadensis",
+"Crassula helmsii",
+"Cygnus olor",
+"Pontederia crassipes",
+"Homarus americanus",
+"Hydrocotyle ranunculoides",
+"Lagarosiphon major",
+"Lythrum salicaria",
+"Myriophyllum aquaticum",
+"Ondatra zibethicus",
+"Pacifastacus leniusculus"
+,"Panicum repens"
+,"Petromyzon marinus"
+,"Phoxinus phoxinus"
+,"Pomacea canaliculata"
+,"Pseudorasbora parva"
+,"Trachemys scripta"
+,"Xenopus laevis"
+,"Aedes albopictus"
+,"Alternanthera philoxeroides"
+,"Cabomba caroliniana"
+,"Castor canadensis"
+,"Chelydra serpentina"
+,"Corbicula fluminea"
+,"Dreissena polymorpha"
+,"Elodea nuttallii"
+,"Lithobates catesbeianus"
+,"Ludwigia grandiflora"
+,"Myocastor coypus"
+,"Mustela vison"
+,"Nymphoides peltata"
+,"Oxyura jamaicensis"
+,"Phragmites australis"
+,"Pistia stratiotes"
+,"Procambarus clarkii"
+,"Rhinella marina"
+,"Salvinia molesta"
+,"Tinca tinca")
+} # aquatic species

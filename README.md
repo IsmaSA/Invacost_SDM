@@ -1,4 +1,6 @@
-# Quantifying the Hidden Costs of Biological Invasions
+# Using species ranges and macroeconomic data to fill the gap in costs of biological invasions
+
+#### DOI:  10.1038/s41559-025-02697-5
 
 **Abstract** 	 	
 
@@ -32,7 +34,10 @@ Biological invasions threaten global biodiversity, human well-being and economie
 - R (version 4.0.0 or higher) --> I used v4.3.1
 - Required R packages: `dismo`, `rgdal`, `raster`, `rgbif`, `stringr`, `raster`, `sf`,`rgeos`,`invacost`, `tidyr`,`caret`,`pROC`, `tmap`,`mgcv`,`gridExtra`
 
-## <a href="https://github.com/IsmaSA/Invacost_SDM/tree/main/Codes.R">Codes</a>
-- <code>Interpolation_costs</code>
+### Note
+The methodology used here to interpolate the economic costs of biological invasions was developed initially in: 
+ > Henry, M., Leung, B., Cuthbert, R. N., Bodey, T. W., Ahmed, D. A., Angulo, E., ... & Haubrock, P. J. (2023). Unveiling the hidden economic toll of biological invasions in the European Union. Environmental Sciences Europe, 35(1), 43.
 
-## <a href="https://github.com/IsmaSA/Invacost_SDM/tree/main/Data">Data</a>
+
+For further information send an email to:
+isma-sa@hotmail.com
