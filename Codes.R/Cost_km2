@@ -1,99 +1,98 @@
-# Note: see also the code in "Plots" - because is more updated
 
-# Note: In this code we will create the cost per km2
+###########  Extract costs per km2 
 
-#Result from the previous code: 
-setwd("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost")
+pacman::p_load(readxl,dplyr,terra,sf,raster, countrycode)
 
-df <- read_xlsx("Interpolate_costs.xlsx")
-df <- df[!duplicated(df[c("Species", "Country")]), ]
-head(df)
 
-spn <- unique(df$Species) # 160 + ...
+df <- read_xlsx("C:/Users/IsmaSA/Desktop/My projects/Brian/Author.Correction/Author.correction.xlsx")
+glimpse(df)
+
+# In the costs per km2, we do not split by type of costs, so we need to sum all the costs per species/country
+df1 <- df %>% group_by(Species, Official_country) %>% summarise(Billion =sum(Cost_estimate_per_year_2017_USD_exchange_rate))
+head(df1)
+
+# we need to works with ISO codes
+df1$ISO3 <- countrycode(df1$Official_country, origin ="country.name", destination ="iso3c")
+any(is.na(df1$ISO3)) # FALSE, good
+
+world <- st_read(dsn = "C:/Users/IsmaSA/Downloads/ZIP files/World_Countries/World_Countries_Generalized.shp") # just a shapefile of countries
+plot(world) 
+world$ISO3 <- countrycode(world$COUNTRY, origin ="country.name", destination ="iso3c")
+
+## Some mismatches in country names: 
+miss <- c( "Azores" = "PRT",  "Madeira" = "PRT",        
+"Canarias" = "ESP",  "Bonaire" = "BES", "Saba" = "BES",
+  "Saint Eustatius" = "BES", "Saint Martin" = "SXM",  "Micronesia" = "FSM",         
+  "Glorioso Islands" = "MYT","Juan De Nova Island" = "MYT" )
+
+world <- world %>%
+  mutate(
+    ISO3 = countrycode(COUNTRY, origin = "country.name", destination = "iso3c"),
+    ISO3 = coalesce(ISO3, recode(COUNTRY, !!!miss)))
+
+any(is.na(world$ISO3)) # FALSE, good
+
+# Loop part: 
+spn <- unique(df1$Species) # unique species for the loop 
 n <- spn[1]
 
-#This is a preliminary code remenber that the name of the countries MUST match
-world <- st_read(dsn = "C:/Users/isma-/Downloads/World_Countries_Generalized.shp")
-world <- world[,c(1,4,5)]
-
 Cost_km2_total <- data.frame()
-# Code for know the cost per sp
+
 for (n in spn) {
-  df1 <- df[df$Species == n, ]
-  countries <- unique(df1$Country)
+    print(n)
+  df2 <- df1[df1$Species == n, ] # Costs of the given species
+  countries <- unique(df2$ISO3) # Countries where the species has costs  (we used ISO codes)
   
-  raster_file <- paste0("prediction_", n, ".tif")
-  raster_path <- file.path("C:/Users/isma-/OneDrive/Escritorio/SDM_Invacost/Background_points/Raster_model", raster_file)
+  raster_file <- paste0("prediction_prediction_", n, ".tif.tif") # This is the name of the SDMs I have --- yes it has two.tif
+  raster_path <- file.path("C:/Users/IsmaSA/Desktop/My projects/Brian/Revision_results/Raster_model_Ensemble", raster_file)
   
-  if (file.exists(raster_path)) {
+  if (file.exists(raster_path)) { 
     prediction_raster <- raster(raster_path)
-    raster <- raster(extent(prediction_raster), res = 0.08333)
-    
-    for (country in countries) {
-      species_country <- df1[df1$Country == country, ]
+#    plot(prediction_raster)    # See the SDMs
+
+
+    for (country in countries) {  # Now we interate for each country where the species has costs
+      species_country <- df2[df2$ISO3 == country, ]  # Here we have the unique combinations species-country
       
-      world1 <- world %>% filter(COUNTRYAFF == country)
-      
+      world1 <- world %>% filter(ISO3 == country) # Filter the world map to have only the country 
+     #  plot(world1)
+
       if (nrow(world1) > 0) {
-        world1$COUNTRYAFF <- as.factor(world1$COUNTRYAFF)
+        world1$ISO3 <- as.factor(world1$ISO3)
         world1 <- world1 %>%
           mutate(COUNTRYAFF_NUM = as.numeric(as.factor(COUNTRYAFF)))
         
-        #I want to obtain the mean latitude: 
-        mean_latitudes <- lapply(world1$geometry, function(polygon) {
-          # Extract all coordinates for the polygon
-          coords <- st_coordinates(polygon)
+       world1 <- st_transform(world1, crs = crs(prediction_raster))   # We need to have the same crs
+       r_country <- prediction_raster %>%  crop(world1) %>%  mask(world1)
+      # plot(r_country) # This show just the country we are working on 
+
+      country_values <- getValues(r_country)
+      # range(country_values, na.rm=T)  # the values of the country
+      
+       # Now we calculate the cost per km2
+       Area_cell <- 8.3*8.3 # aprox to my res 0.08 
+
+       suitability_sum <- sum(country_values, na.rm = TRUE)
+       suitable_area_km2 <- suitability_sum * Area_cell  # area suitable in km2
+
+       cost_total <- species_country$Billion * 1e9  # Cost of the species in the country
+       Cost_km2 <- cost_total / suitable_area_km2
           
-          # Extract the latitude values (second column of the coords matrix)
-          latitudes <- coords[,2]
-          
-          # Calculate and return the mean latitude
-          mean(latitudes)
-        })
-        
-        # Convert the list to a vector and add it to the dataframe
-        
-        lat <- unlist(mean_latitudes)
-        lat_rad <- lat * (pi/180)
-        Area_cell <- 111.1 * 111.3 * cos(lat_rad)  
-        
-        
-        
-        rasterized <- rasterize(world1, raster, field = "COUNTRYAFF_NUM")
-        
-        country_values <- getValues(rasterized)
-        
-        prediction_raster$new_column <- country_values
-        
-        mask <- prediction_raster[[2]] == 1
-        filtered_values <- prediction_raster[[1]][mask]
-        
-        if (length(filtered_values) > 0) {
-          suitability <- filtered_values %>% as.data.frame()
-          
-          z <- b0 + b1 * sum(suitability$., na.rm=TRUE)
-          A_prime_ci <- sum(suitability$., na.rm=TRUE) / (1 + exp(-z))
-          
-          
-          # Conversion to km²
-          #Area_cell <- 9.259 ^ 2  # Aproxx to my res 0.0833
-          suitable_area_cell = as.numeric(A_prime_ci) * Area_cell
-          
-          Cost_km2 <- species_country$Cost_interpolated / suitable_area_cell
-          
-          Cost_per_km2 <- data.frame(Cost = Cost_km2)
-          
-          Cost_per_km2$country <- country
-          Cost_per_km2$species <- n
-          
-          Cost_km2_total <- rbind(Cost_km2_total, Cost_per_km2)
-        }
-        cat("*")
+          Cost_per_km2 <- data.frame(Cost.km2 = Cost_km2)
+        Cost_per_km2$Total.cost <-  species_country$Billion * 1e9 
+           Cost_per_km2$species <- n
+          Cost_per_km2$ISO <- country
+        Cost_per_km2$Country  <- species_country$Official_country
+        Cost_per_km2$suitability.sum.cells  <- suitability_sum
+        Cost_per_km2$suitable_area_km2  <- suitable_area_km2
+
+        Cost_km2_total <- rbind(Cost_km2_total, Cost_per_km2)
+     
       }
     }
 }
 }
 
-Cost_km2_total %>% group_by(species) %>% summarise(Mean_cost_km2= mean(Cost)) #mean cost per species
+a<-Cost_km2_total %>% group_by(species) %>% summarise(Mean_cost_km2= mean(Cost.km2)) #mean cost per species
 
-Cost_km2_total %>% group_by(country) %>% summarise(Mean_cost_km2= mean(Cost)) #mean cost per country
+Cost_km2_total %>% group_by(Country) %>% summarise(Mean_cost_km2= mean(Cost.km2)) #mean cost per country
