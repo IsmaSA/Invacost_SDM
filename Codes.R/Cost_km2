@@ -1,7 +1,9 @@
 
+
 ###########  Extract costs per km2 
 
 pacman::p_load(readxl,dplyr,terra,sf,raster, countrycode)
+
 
 
 df <- read_xlsx("C:/Users/IsmaSA/Desktop/My projects/Brian/Author.Correction/Author.correction.xlsx")
@@ -96,3 +98,99 @@ for (n in spn) {
 a<-Cost_km2_total %>% group_by(species) %>% summarise(Mean_cost_km2= mean(Cost.km2)) #mean cost per species
 
 Cost_km2_total %>% group_by(Country) %>% summarise(Mean_cost_km2= mean(Cost.km2)) #mean cost per country
+
+writexl::write_xlsx(Cost_km2_total, "Species_costs_per_km2.xlsx")
+
+a$Mean_cost_km2 <- as.numeric(a$Mean_cost_km2)
+#543,848
+
+
+
+############ Visualisation of costs per km2
+
+
+# Brian idea   ####
+#     One could provide maps explicitly showing the per grid cell prediction
+#     of costs (i.e., simply take the country level estimate, and partition it
+#     by relative SDM probability to every cell in the country).
+
+all <- Cost_km2_total  # we can use this file generating before as it has the total costs per sp * country
+all1 <- all
+colnames(all1)[4] <- "ISO3"
+spn <- unique(all1$species) 
+n <- spn[1]
+
+world <- st_read(dsn = "C:/Users/IsmaSA/Downloads/ZIP files/World_Countries/World_Countries_Generalized.shp") # just a shapefile of countries
+world$ISO3 <- countrycode(world$COUNTRY, origin ="country.name", destination ="iso3c")
+
+## Some mismatches in country names: 
+miss <- c( "Azores" = "PRT",  "Madeira" = "PRT",        
+"Canarias" = "ESP",  "Bonaire" = "BES", "Saba" = "BES",
+  "Saint Eustatius" = "BES", "Saint Martin" = "SXM",  "Micronesia" = "FSM",         
+  "Glorioso Islands" = "MYT","Juan De Nova Island" = "MYT" )
+
+world <- world %>%
+  mutate(
+    ISO3 = countrycode(COUNTRY, origin = "country.name", destination = "iso3c"),
+    ISO3 = coalesce(ISO3, recode(COUNTRY, !!!miss)))
+
+raster_file <- paste0("prediction_prediction_", n, ".tif.tif")
+raster_path <- file.path("C:/Users/IsmaSA/Desktop/My projects/Brian/Revision_results/Raster_model_Ensemble", raster_file)
+
+exampleRaster <- raster(raster_path)  # Use the first raster to define the dimensions
+cumulativeCostRaster <- raster(extent(exampleRaster), nrows=nrow(exampleRaster), ncols=ncol(exampleRaster), crs=crs(exampleRaster))
+cumulativeCostRaster[] <- 0  
+
+for (n in spn) {
+    print(n)
+  df1 <- all1[all1$species == n, ]
+  countries <- unique(df1$ISO3)
+  
+  raster_file <- paste0("prediction_prediction_", n, ".tif.tif") # This is the name of the SDMs I have --- yes it has two.tif
+  raster_path <- file.path("C:/Users/IsmaSA/Desktop/My projects/Brian/Revision_results/Raster_model_Ensemble", raster_file)
+
+  if (file.exists(raster_path)) {
+    raster <- raster(raster_path)
+
+    for (country in countries) {
+      species_country <- df1[df1$ISO3 == country, ]
+      
+    world1 <- world %>% filter(ISO3 == country) 
+      
+      if (nrow(world1) > 0) {
+         world1$ISO3 <- as.factor(world1$ISO3)
+        world1 <- world1 %>%  mutate(COUNTRYAFF_NUM = as.numeric(as.factor(COUNTRYAFF)))
+        
+       world1 <- st_transform(world1, crs = crs(prediction_raster))   # We need to have the same crs
+       r_country <- prediction_raster  %>%  mask(world1)
+
+        total_prob <- sum(r_country[], na.rm = TRUE)
+        
+        country_cost <- species_country$Total.cost 
+        
+        cost_distribution <- r_country
+        values(cost_distribution) <- ifelse(!is.na(values(cost_distribution)), (values(cost_distribution) / total_prob) * country_cost, NA)
+        
+        # Add this species' cost distribution to the cumulative cost raster
+        cumulativeCostRaster <- cumulativeCostRaster + replace(cost_distribution, is.na(values(cost_distribution)), 0)
+
+      }
+    }
+  }
+}
+
+summary(cumulativeCostRaster)
+plot(cumulativeCostRaster)
+writeRaster(cumulativeCostRaster,'Cost.km.tif')
+
+
+log_raster<- raster::raster("cost_per_cell_log.tif")
+log_raster<- raster::raster("cost_per_cell.tif")
+
+
+log_raster <- log10(cumulativeCostRaster + 1)
+library(RColorBrewer)
+colorPalette <- colorRampPalette(brewer.pal(11, "Spectral"))
+
+plot(log_raster, col=colorPalette(100), main="Log-Scaled Cumulative Cost Raster",
+     xlab="Longitude", ylab="Latitude")
