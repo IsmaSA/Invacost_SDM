@@ -4,8 +4,6 @@
 
 pacman::p_load(readxl,dplyr,terra,sf,raster, countrycode)
 
-
-
 df <- read_xlsx("C:/Users/IsmaSA/Desktop/My projects/Brian/Author.Correction/Author.correction.xlsx")
 glimpse(df)
 
@@ -40,6 +38,7 @@ n <- spn[1]
 
 Cost_km2_total <- data.frame()
 
+for
 for (n in spn) {
     print(n)
   df2 <- df1[df1$Species == n, ] # Costs of the given species
@@ -194,3 +193,271 @@ colorPalette <- colorRampPalette(brewer.pal(11, "Spectral"))
 
 plot(log_raster, col=colorPalette(100), main="Log-Scaled Cumulative Cost Raster",
      xlab="Longitude", ylab="Latitude")
+
+
+
+
+##################################################################################################################
+#                                        Cost species per km2 
+##################################################################################################################
+
+
+df <- read_xlsx("C:/Users/IsmaSA/Desktop/My projects/Brian/Author.Correction/Author.correction.xlsx")
+glimpse(df)
+
+# In the costs per km2, we do not split by type of costs, so we need to sum all the costs per species/country
+df1 <- df %>% group_by(Species, Official_country,Type_of_cost_merged ) %>% summarise(Billion =sum(Cost_estimate_per_year_2017_USD_exchange_rate))
+head(df1)
+
+# we need to works with ISO codes
+df1$ISO3 <- countrycode::countrycode(df1$Official_country, origin ="country.name", destination ="iso3c")
+any(is.na(df1$ISO3)) # FALSE, good
+
+world <- st_read(dsn = "C:/Users/IsmaSA/Downloads/ZIP files/World_Countries/World_Countries_Generalized.shp") # just a shapefile of countries
+plot(world) 
+world$ISO3 <- countrycode(world$COUNTRY, origin ="country.name", destination ="iso3c")
+
+## Some mismatches in country names: 
+miss <- c( "Azores" = "PRT",  "Madeira" = "PRT",        
+"Canarias" = "ESP",  "Bonaire" = "BES", "Saba" = "BES",
+  "Saint Eustatius" = "BES", "Saint Martin" = "SXM",  "Micronesia" = "FSM",         
+  "Glorioso Islands" = "MYT","Juan De Nova Island" = "MYT" )
+
+world <- world %>%
+  mutate(
+    ISO3 = countrycode(COUNTRY, origin = "country.name", destination = "iso3c"),
+    ISO3 = coalesce(ISO3, recode(COUNTRY, !!!miss)))
+
+any(is.na(world$ISO3)) # FALSE, good
+
+# Loop part: 
+spn <- unique(df1$Species) # unique species for the loop 
+n <- spn[1]
+type <- unique(df1$Type_of_cost_merged )
+t <-"Damage"
+Cost_km2_total <- data.frame()
+
+for(t in type){
+    print(t)
+df11 <- df1[df1$Type_of_cost_merged ==t,]
+spn <- unique(df11$Species)
+
+for (n in spn) {
+    print(n)
+  df2 <- df11[df11$Species == n, ] # Costs of the given species
+  countries <- unique(df2$ISO3) # Countries where the species has costs  (we used ISO codes)
+  
+  raster_file <- paste0("prediction_prediction_", n, ".tif.tif") # This is the name of the SDMs I have --- yes it has two.tif
+  raster_path <- file.path("C:/Users/IsmaSA/Desktop/My projects/Brian/Revision_results/Raster_model_Ensemble", raster_file)
+  
+  if (file.exists(raster_path)) { 
+    prediction_raster <- raster(raster_path)
+#    plot(prediction_raster)    # See the SDMs
+
+    for (country in countries) {  # Now we interate for each country where the species has costs
+      species_country <- df2[df2$ISO3 == country, ]  # Here we have the unique combinations species-country
+      
+      world1 <- world %>% filter(ISO3 == country) # Filter the world map to have only the country 
+     #  plot(world1)
+
+      if (nrow(world1) > 0) {
+        world1$ISO3 <- as.factor(world1$ISO3)
+        world1 <- world1 %>%
+          mutate(COUNTRYAFF_NUM = as.numeric(as.factor(COUNTRYAFF)))
+        
+       world1 <- st_transform(world1, crs = crs(prediction_raster))   # We need to have the same crs
+       r_country <- prediction_raster %>%  crop(world1) %>%  mask(world1)
+      # plot(r_country) # This show just the country we are working on 
+
+      country_values <- getValues(r_country)
+      # range(country_values, na.rm=T)  # the values of the country
+      
+       # Now we calculate the cost per km2
+       Area_cell <- 8.3*8.3 # aprox to my res 0.08 
+
+       suitability_sum <- sum(country_values, na.rm = TRUE)
+       suitable_area_km2 <- suitability_sum * Area_cell  # area suitable in km2
+
+       cost_total <- species_country$Billion * 1e9  # Cost of the species in the country
+       Cost_km2 <- cost_total / suitable_area_km2
+          
+          Cost_per_km2 <- data.frame(Cost.km2 = Cost_km2)
+        Cost_per_km2$Total.cost <-  species_country$Billion * 1e9 
+           Cost_per_km2$species <- n
+          Cost_per_km2$ISO <- country
+        Cost_per_km2$Country  <- species_country$Official_country
+        Cost_per_km2$type.cost <- t
+        Cost_per_km2$suitability.sum.cells  <- suitability_sum
+        Cost_per_km2$suitable_area_km2  <- suitable_area_km2
+
+        Cost_km2_total <- rbind(Cost_km2_total, Cost_per_km2)
+     
+      }
+    }
+}
+}
+}
+
+a<-Cost_km2_total %>% group_by(species) %>% summarise(Mean_cost_km2= mean(Cost.km2)) #mean cost per species
+
+Cost_km2_total %>% group_by(Country) %>% summarise(Mean_cost_km2= mean(Cost.km2)) #mean cost per country
+
+writexl::write_xlsx(Cost_km2_total, "Species_costs_per_km2.type.xlsx")
+
+a$Mean_cost_km2 <- as.numeric(a$Mean_cost_km2)
+#543,848
+
+
+head(Cost_km2_total)
+glimpse(Cost_km2_total)
+
+data1 <- Cost_km2_total %>%
+  filter(suitable_area_km2 > 1) %>%
+  mutate(Cost = as.numeric(Cost.km2)) %>%  
+  group_by(species, type.cost) %>%
+  summarise(Cost = mean(Cost, na.rm = TRUE)) %>% 
+  #mutate(Cost_transformed = Cost * 1000000000) %>%
+  group_by(type.cost) %>%
+  top_n(5, Cost)
+
+
+desired_order <- c("Anolis carolinensis","Aedes aegypti","Reynoutria japonica",
+"Cryptotermes brevis","Phelipanche aegyptiaca", 
+    "Heracleum mantegazzianum","Carduus platypus",
+"Capra hircus","Sus scrofa","Coptotermes formosanus")
+
+data1$species <- factor(data1$species, levels = desired_order)
+
+damage <- mean(data1$Cost[data1$type.cost == "Damage"])
+management <- mean(data1$Cost[data1$type.cost == "Management"])
+
+options(scipen=999)
+p1<-ggplot(data = data1, aes(x = species, y = Cost)) + coord_flip()+
+  geom_point(aes(color = type.cost), size = 8) +
+  geom_segment(aes(xend = species, yend = 0, color = type.cost), size=2) +
+  geom_hline(yintercept = damage, linetype="dashed", color = "orange", alpha = 0.5, size= 0.8) +
+  geom_hline(yintercept = management, linetype="dashed", color = "green", alpha = 0.5, size= 0.8) +
+  scale_y_log10() + 
+  scale_color_manual(
+    name = "Type of cost",
+    values = c("Damage" = "orange", "Management" = "#00a691")
+  ) +  theme_bw() +
+  theme( legend.position = "none",
+         axis.text.x = element_text(size = 12, color= "black"), 
+         axis.text.y = element_text(size = 12, face = "italic", color= "black"), 
+         axis.title.x = element_text(size = 14, face = "bold", color= "black")
+  ) +
+  labs(y = expression(paste("Economic cost per km"^"2")), x = NULL) + # Make "2" superscript
+  annotation_logticks(sides = "b", short = unit(1,"mm"),
+                      mid = unit(2,"mm"),
+                      long = unit(3,"mm"))
+p1
+
+data1
+
+
+##################################################################################################################
+#                                        Cost country  per km2 
+##################################################################################################################
+
+
+country <- read_xlsx("C:/Users/IsmaSA/Desktop/My projects/Brian/Author.Correction/Species_costs_per_km2.xlsx")
+head(country)
+
+data2<- country %>% 
+  filter(suitability.sum.cells > 1) %>% 
+  group_by(Country) %>% mutate(Cost.km2 =as.numeric(Cost.km2)) %>% 
+  summarise(Cost = mean(as.numeric(Cost.km2, na.rm = TRUE))) %>% arrange(-Cost) %>% 
+  slice_head(n =20)
+
+custom_colors <- c("#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", 
+                   "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+                   "#e904a7", "#5638f7", "#6ef6c1", "#d42099", "#232656",
+                   "#3e0c9a", "#1009c3", "#9627f8", "#2e13a8", "#394b32")
+
+data2$Country[data2$Country =="Micronesia, Federated States of"] <- "Micronesia"
+unique(data2$Country)
+
+p2 <- ggplot(data = data2, aes(x = reorder(Country, +Cost), y = Cost, color = Country)) +
+  coord_flip() +
+  geom_segment(aes(xend = Country, yend = 0), size = 2) +   # colored bars
+  geom_point(size = 7) +                                    # colored points
+  scale_y_log10() +
+  scale_color_manual(values = custom_colors) +              # manual color palette
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(size = 12, color = "black"), 
+    axis.text.y = element_text(size = 12, color = "black"),
+    axis.title.x = element_text(size = 14, face = "bold", color = "black")
+  ) +
+  labs(y = expression(paste("Economic cost per km"^"2")), x = NULL) +
+  annotation_logticks(
+    sides = "b", 
+    short = unit(1, "mm"),
+    mid   = unit(2, "mm"),
+    long  = unit(3, "mm")
+  )
+
+
+p2
+
+
+
+##################################################################################################################
+#                                        High- resolution map  
+##################################################################################################################
+
+
+r <- "C:/Users/IsmaSA/Desktop/My projects/Brian/Author.Correction/Cost.km.tif"
+
+cumulativeCostRaster <- raster(r)
+plot(cumulativeCostRaster)
+
+log_raster <- log10(cumulativeCostRaster + 1)
+library(RColorBrewer)
+colorPalette <- colorRampPalette(brewer.pal(11, "Spectral"))
+plot(log_raster, col=colorPalette(100), main="Log-Scaled Cumulative Cost Raster",
+     xlab="Longitude", ylab="Latitude")
+
+
+# ---
+cumulativeCostRaster <- raster(r)
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+world <- st_make_valid(world)
+
+tmap_options(check.and.fix = TRUE)
+world <- st_transform(world, crs = projection(log_raster))
+
+cumulativeCostRaster # 781,748,608
+bre <- c(0, 100, 1e3, 1e4, 5e4, 1e5, 5e5, 1e6,1e7,1e8,6e8)
+labels <- c("1–100", 
+            "101–1,000", 
+            "1,001–10,000", 
+            "10,001–50,000", 
+            "50,001–100,000", 
+            "100,001–500,000", 
+            "500,001–1,000,000", 
+            "1,000,001–10,000,000", 
+            "10,000,001–100,000,000", 
+            "100,000,001–700,000,000")
+
+tmap <-tm_shape(cumulativeCostRaster, raster.downsample = FALSE, projection = "+proj=eck4",raster.warp = FALSE) +
+  tm_raster(style = "fixed", 
+            breaks = bre, 
+            labels = labels,
+            palette = "YlOrBr", 
+            title = "Economic cost in US$") +
+  tm_shape(world) +
+  tm_borders(col = "grey50", lwd = 0.1)
+
+world <- st_simplify(world, dTolerance  = 50000)
+
+tmap_save(
+  tm = tmap,
+  filename = "economic_cost_map.svg",
+  width = 500,     #
+  height = 300,
+  dpi = 150,       
+  compression = 9 )
