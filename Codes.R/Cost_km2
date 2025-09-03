@@ -459,5 +459,10 @@ tmap_save(
   filename = "economic_cost_map.svg",
   width = 500,     #
   height = 300,
-  dpi = 150,       
-  compression = 9 )
+  dpi = 150 )
+tmap_save(
+  tm = tmap,
+  filename = "economic_cost_map.pdf",
+  width = 500,     #
+  height = 300,
+  dpi = 150 )
